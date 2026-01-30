@@ -1,0 +1,7 @@
+{
+  "FIN_REV_GROWTH": { "median": 8 },
+  "FIN_PROFIT_MARGIN": { "median": 25 },
+  "CUST_CHURN": { "median": 3 },
+  "OPS_COST_RATIO": { "median": 22 },
+  "PEOPLE_ATTRITION": { "median": 10 }
+}

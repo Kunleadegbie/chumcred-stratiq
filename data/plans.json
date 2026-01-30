@@ -1,0 +1,22 @@
+{
+  "Starter": {
+    "price": 50000,
+    "max_reviews": 3,
+    "max_exports": 3,
+    "advisor": false
+  },
+
+  "Pro": {
+    "price": 250000,
+    "max_reviews": 20,
+    "max_exports": 50,
+    "advisor": true
+  },
+
+  "Enterprise": {
+    "price": 2000000,
+    "max_reviews": 999,
+    "max_exports": 999,
+    "advisor": true
+  }
+}

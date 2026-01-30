@@ -1,0 +1,71 @@
+{
+  "FIN_REV_GROWTH": {
+    "name": "Revenue Growth (YoY)",
+    "pillar": "FINANCIAL",
+    "unit": "percent",
+    "direction": "higher_is_better",
+    "scoring_rules": [
+      { "min": null, "max": 0, "score": 1 },
+      { "min": 1, "max": 5, "score": 2 },
+      { "min": 6, "max": 10, "score": 3 },
+      { "min": 11, "max": 20, "score": 4 },
+      { "min": 21, "max": null, "score": 5 }
+    ]
+  },
+
+  "FIN_PROFIT_MARGIN": {
+    "name": "Profit Margin",
+    "pillar": "FINANCIAL",
+    "unit": "percent",
+    "direction": "higher_is_better",
+    "scoring_rules": [
+      { "min": null, "max": 5, "score": 1 },
+      { "min": 6, "max": 10, "score": 2 },
+      { "min": 11, "max": 20, "score": 3 },
+      { "min": 21, "max": 30, "score": 4 },
+      { "min": 31, "max": null, "score": 5 }
+    ]
+  },
+
+  "CUST_CHURN": {
+    "name": "Customer Churn Rate",
+    "pillar": "CUSTOMER",
+    "unit": "percent",
+    "direction": "lower_is_better",
+    "scoring_rules": [
+      { "min": 10, "max": null, "score": 1 },
+      { "min": 7, "max": 9.9, "score": 2 },
+      { "min": 4, "max": 6.9, "score": 3 },
+      { "min": 2, "max": 3.9, "score": 4 },
+      { "min": null, "max": 1.9, "score": 5 }
+    ]
+  },
+
+  "OPS_COST_RATIO": {
+    "name": "Operating Cost Ratio",
+    "pillar": "OPERATIONS",
+    "unit": "percent",
+    "direction": "lower_is_better",
+    "scoring_rules": [
+      { "min": 40, "max": null, "score": 1 },
+      { "min": 30, "max": 39.9, "score": 2 },
+      { "min": 20, "max": 29.9, "score": 3 },
+      { "min": 10, "max": 19.9, "score": 4 },
+      { "min": null, "max": 9.9, "score": 5 }
+    ]
+  },
+
+  "PEOPLE_ATTRITION": {
+    "name": "Employee Attrition Rate",
+    "pillar": "PEOPLE",
+    "unit": "percent",
+    "direction": "lower_is_better",
+    "scoring_rules": [
+      { "min": 25, "max": null, "score": 1 },
+      { "min": 18, "max": 24.9, "score": 2 },
+      { "min": 12, "max": 17.9, "score": 3 },
+      { "min": 6, "max": 11.9, "score": 4 },
+      { "min": null, "max": 5.9, "score": 5 }
+    ]
+  }
+}

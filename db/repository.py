@@ -9,11 +9,18 @@ def get_conn():
 
 
 def init_db():
-    conn = get_conn()
-    with open(Path(__file__).parent / "schema.sql") as f:
+
+    conn = get_connection()
+
+    import os
+
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
+
+    with open(SCHEMA_PATH) as f:
         conn.executescript(f.read())
+
     conn.commit()
-    conn.close()
 
 
 # ---------------- Reviews ----------------

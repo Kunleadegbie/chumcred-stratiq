@@ -3,6 +3,9 @@ import streamlit as st
 from db.repository import get_user_by_email, create_user
 from services.auth import hash_password
 
+st.write("DEBUG: App loaded")
+
+
 
 # ==========================================================
 # AUTO BOOTSTRAP ADMIN
@@ -57,7 +60,12 @@ if "user" not in st.session_state:
 from components.sidebar import render_sidebar
 from components.styling import apply_talentiq_sidebar_style
 
+st.write("DEBUG: Loading sidebar")
+
 render_sidebar()
+
+st.write("DEBUG: Sidebar loaded")
+
 apply_talentiq_sidebar_style()
 
 

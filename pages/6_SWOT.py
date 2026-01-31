@@ -69,6 +69,11 @@ bench = compare_to_benchmark(scores, industry)
 
 swot = generate_swot(scores, bench)
 
+if not scores:
+    st.warning("⚠️ No analysis data found.")
+    st.info("Complete Financial Analyzer → Scoring → Benchmarking first.")
+    st.stop()
+
 
 for k, v in swot.items():
 

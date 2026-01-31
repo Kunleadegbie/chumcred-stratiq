@@ -61,8 +61,10 @@ industry = review[2]
 scores = get_scores(review_id)
 
 if not scores:
-    st.warning("Run scoring first.")
+    st.warning("⚠️ No scores found yet.")
+    st.info("Please go to **Scoring Dashboard** and compute scores first.")
     st.stop()
+
 
 
 results = compare_to_benchmark(scores, industry)

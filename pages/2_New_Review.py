@@ -88,7 +88,10 @@ industries = [
     "Transportation",
     "Mining",
     "ICT Services",
-    "Insurance"
+    "Insurance",
+    "Consultancy",
+    "Forex Trading",
+    "Fintech"
 ]
 
 
@@ -141,11 +144,3 @@ if submit:
 
 
     st.switch_page("pages/3_Data_Input.py")
-
-# other imports
-from components.footer import render_footer
-
-# page code ...
-
-render_footer()
-

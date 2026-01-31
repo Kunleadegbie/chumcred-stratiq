@@ -1,12 +1,12 @@
 import streamlit as st
 
-# ==========================================================
-# AUTO-BOOTSTRAP ADMIN (RUNS ON FIRST DEPLOY)
-# ==========================================================
-
 from db.repository import get_user_by_email, create_user
 from services.auth import hash_password
 
+
+# ==========================================================
+# AUTO BOOTSTRAP ADMIN
+# ==========================================================
 
 def bootstrap_admin():
 
@@ -24,10 +24,11 @@ def bootstrap_admin():
             is_active=1
         )
 
-        print("Production admin account created.")
+        print("Production admin created")
 
 
 bootstrap_admin()
+
 
 # ==========================================================
 # PAGE CONFIG (MUST BE FIRST)
@@ -53,16 +54,12 @@ if "user" not in st.session_state:
 # SIDEBAR + STYLING
 # ==========================================================
 
-try:
-    from components.sidebar import render_sidebar
-    from components.styling import apply_talentiq_sidebar_style
+from components.sidebar import render_sidebar
+from components.styling import apply_talentiq_sidebar_style
 
-    render_sidebar()
-    apply_talentiq_sidebar_style()
+render_sidebar()
+apply_talentiq_sidebar_style()
 
-except Exception as e:
-    st.warning("Navigation system not loaded properly.")
-    print("Sidebar load error:", e)
 
 # ==========================================================
 # MAIN DASHBOARD

@@ -51,14 +51,14 @@ def get_conn():
 # REVIEWS
 # ==========================================================
 
-def create_review(company, industry):
+def create_review(company_name, industry):
 
     conn = get_conn()
     cur = conn.cursor()
 
     cur.execute(
         "INSERT INTO reviews (company_name, industry) VALUES (?, ?)",
-        (company, industry)
+        (company_name, industry)
     )
 
     conn.commit()

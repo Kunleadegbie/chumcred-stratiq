@@ -35,6 +35,8 @@ st.title("📊 Industry Benchmarking")
 reviews = get_reviews()
 
 if not reviews:
+    st.warning("No reviews found yet.")
+    st.info("Start with: New Review → Data Input → Scoring")
     st.stop()
 
 

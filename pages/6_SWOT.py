@@ -34,9 +34,11 @@ st.title("🧭 SWOT Analysis")
 
 reviews = get_reviews()
 
-if not reviews:
-    st.stop()
 
+if not reviews:
+    st.warning("No reviews found.")
+    st.info("Please create a review first.")
+    st.stop()
 
 review_map = {
     f"{r[1]} (#{r[0]})": r[0]
@@ -61,19 +63,14 @@ industry = review[2]
 scores = get_scores(review_id)
 
 if not scores:
-    st.warning("Run scoring first.")
+    st.warning("No scoring data found.")
+    st.info("Please complete: Data Input → Scoring → Benchmarking")
     st.stop()
 
 
 bench = compare_to_benchmark(scores, industry)
 
 swot = generate_swot(scores, bench)
-
-if not scores:
-    st.warning("⚠️ No analysis data found.")
-    st.info("Complete Financial Analyzer → Scoring → Benchmarking first.")
-    st.stop()
-
 
 for k, v in swot.items():
 

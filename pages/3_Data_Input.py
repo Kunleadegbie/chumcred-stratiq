@@ -70,7 +70,12 @@ with st.form("kpi_form"):
 
         default = existing.get(kpi_id, 0.0)
 
-        val = st.number_input(label, value=float(default))
+        val = st.number_input(
+            label,
+            value=float(default),
+            key=f"kpi_{review_id}_{kpi_id}"
+        )
+
 
         inputs[kpi_id] = val
 

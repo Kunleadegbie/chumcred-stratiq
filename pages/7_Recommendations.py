@@ -36,6 +36,8 @@ st.title("💡 Recommendations")
 reviews = get_reviews()
 
 if not reviews:
+    st.warning("No reviews found.")
+    st.info("Please start with New Review.")
     st.stop()
 
 
@@ -62,7 +64,8 @@ industry = review[2]
 scores = get_scores(review_id)
 
 if not scores:
-    st.warning("Run scoring first.")
+    st.warning("No scoring data available.")
+    st.info("Please complete analysis pipeline first.")
     st.stop()
 
 

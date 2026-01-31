@@ -18,7 +18,7 @@ from components.finance_charts import *
 
 
 # ==================================================
-# PAGE CONFIG (FIRST STREAMLIT CALL)
+# PAGE CONFIG (FIRST CALL)
 # ==================================================
 
 st.set_page_config(
@@ -28,7 +28,7 @@ st.set_page_config(
 
 
 # ==================================================
-# INIT SESSION STATE
+# SESSION STATE INIT
 # ==================================================
 
 if "fin_excel" not in st.session_state:
@@ -42,6 +42,30 @@ if "finance_insights" not in st.session_state:
 
 if "finance_alerts" not in st.session_state:
     st.session_state["finance_alerts"] = []
+
+
+# ==================================================
+# AUTH GUARD
+# ==================================================
+
+if "user" not in st.session_state:
+    st.switch_page("pages/Login.py")
+    st.stop()
+
+if "active_review" not in st.session_state:
+    st.warning("Create a review first.")
+    st.switch_page("pages/2_New_Review.py")
+    st.stop()
+
+
+# ==================================================
+# UI SETUP
+# ==================================================
+
+apply_talentiq_sidebar_style()
+render_sidebar()
+
+st.title("📊 Financial Analyzer (3-Year Trend)")
 
 
 # ==================================================
@@ -75,31 +99,6 @@ def get_val(key, idx=None, default=0.0):
 
     except Exception:
         return float(default)
-
-
-# ==================================================
-# AUTH
-# ==================================================
-
-if "user" not in st.session_state:
-    st.switch_page("pages/Login.py")
-    st.stop()
-
-
-if "active_review" not in st.session_state:
-    st.warning("Create a review first.")
-    st.switch_page("pages/2_New_Review.py")
-    st.stop()
-
-
-# ==================================================
-# UI SETUP
-# ==================================================
-
-apply_talentiq_sidebar_style()
-render_sidebar()
-
-st.title("📊 Financial Analyzer (3-Year Trend)")
 
 
 # ==================================================
@@ -193,21 +192,16 @@ st.subheader("Income Statement (3 Years)")
 c1, c2, c3 = st.columns(3)
 
 with c1:
-
     rev_y2 = st.number_input("Revenue (Y-2)", 0.0, value=get_val("rev", 0))
     ebitda_y2 = st.number_input("EBITDA (Y-2)", 0.0, value=get_val("ebitda", 0))
     profit_y2 = st.number_input("Net Profit (Y-2)", 0.0, value=get_val("profit", 0))
 
-
 with c2:
-
     rev_y1 = st.number_input("Revenue (Y-1)", 0.0, value=get_val("rev", 1))
     ebitda_y1 = st.number_input("EBITDA (Y-1)", 0.0, value=get_val("ebitda", 1))
     profit_y1 = st.number_input("Net Profit (Y-1)", 0.0, value=get_val("profit", 1))
 
-
 with c3:
-
     rev_y = st.number_input("Revenue (Y)", 0.0, value=get_val("rev", 2))
     ebitda_y = st.number_input("EBITDA (Y)", 0.0, value=get_val("ebitda", 2))
     profit_y = st.number_input("Net Profit (Y)", 0.0, value=get_val("profit", 2))
@@ -222,19 +216,14 @@ st.subheader("Balance Sheet")
 b1, b2, b3 = st.columns(3)
 
 with b1:
-
     assets = st.number_input("Total Assets", 0.0, value=get_val("assets"))
     equity = st.number_input("Equity", 0.0, value=get_val("equity"))
 
-
 with b2:
-
     current_assets = st.number_input("Current Assets", 0.0, value=get_val("current_assets"))
     current_liabilities = st.number_input("Current Liabilities", 0.0, value=get_val("current_liabilities"))
 
-
 with b3:
-
     debt = st.number_input("Total Debt", 0.0, value=get_val("debt"))
 
 
@@ -254,7 +243,7 @@ with cf2:
 
 
 # ==================================================
-# ANALYSIS
+# ANALYZE
 # ==================================================
 
 st.divider()
@@ -280,20 +269,24 @@ if st.button("📈 Analyze Financials"):
     }
 
 
-    results = analyze_financials(data)
-
+    # Persist raw inputs
     st.session_state["fin_excel"] = data
 
 
+    # Run Engine
+    results = analyze_financials(data)
+
+
+    # Persist results
     st.session_state["finance_results"] = results
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
 
-    st.success("Financial Analysis Completed")
+    st.success("✅ Financial Analysis Completed")
 
 
 # ==================================================
-# RESULTS DISPLAY
+# RESULTS
 # ==================================================
 
 if st.session_state["finance_results"]:
@@ -355,33 +348,36 @@ if st.session_state["finance_results"]:
             st.info(msg)
 
 
-    # ---------------- Save ----------------
-    
+    # ---------------- SEND TO KPI ----------------
+
+    st.divider()
+
     if st.button("➡️ Send to KPI Input"):
 
         results = st.session_state["finance_results"]
 
-        # Map Financial Results → KPI IDs
+
+        # Financial → KPI Mapping
         kpi_payload = {
+
             "FIN_REV_GROWTH_YOY": results.get("rev_cagr", 0),
             "FIN_EBITDA_MARGIN": results.get("ebitda_margin", 0),
             "FIN_NET_MARGIN": results.get("net_margin", 0),
+
             "FIN_ROA": results.get("roa", 0),
             "FIN_ROE": results.get("roe", 0),
+
             "FIN_CURRENT_RATIO": results.get("current_ratio", 0),
             "FIN_DEBT_RATIO": results.get("debt_ratio", 0),
         }
+
 
         save_financial_kpis(
             st.session_state["active_review"],
             kpi_payload
         )
 
+
         st.success("✅ Financial KPIs sent to Data Input")
 
         st.switch_page("pages/3_Data_Input.py")
-
-
-
-
-    

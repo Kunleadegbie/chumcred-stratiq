@@ -58,7 +58,7 @@ if "user" not in st.session_state:
 
 if "active_review" not in st.session_state:
     st.warning("⚠️ Please create a review first before using Financial Analyzer.")
-    st.switch_page("pages/2_New_Review.py")
+    st.switch_page("pages/11_Financial_Analyzer.py")
     st.stop()
 
 

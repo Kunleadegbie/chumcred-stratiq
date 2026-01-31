@@ -23,26 +23,29 @@ from reportlab.lib.colors import black, lightgrey, HexColor
 
 from core.report_engine import generate_report_payload
 from core.narrative_engine import generate_executive_summary
+from core.finance_advisor import generate_finance_insights
 
 
 # ==========================================================
 # BRANDING CONFIG
 # ==========================================================
 
-LOGO_PATH = "assets/logo.png"
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+LOGO_PATH = BASE_DIR / "assets" / "logo.png"
 
 
 BRAND = {
-    "name": "Chumcred Business Advisory",
-    "tagline": "Data-Driven Strategy & Performance Advisory",
+    "name": "Chumcred StratIQ",
+    "tagline": "AI-Powered Business & Financial Intelligence Platform",
     "color": "#0F766E",
     "footer": "© Chumcred Consulting | Confidential",
 }
 
 
 WHITE_LABEL = {
-    "name": "Confidential Business Report",
-    "tagline": "Prepared for Internal Management Use",
+    "name": "Confidential Management Report",
+    "tagline": "Prepared for Internal Use",
     "color": "#1F2933",
     "footer": "Strictly Confidential",
 }
@@ -61,7 +64,6 @@ def export_report_to_pdf(
     Generate board / executive PDF report.
     """
 
-
     # --------------------------------------------------
     # LOAD DATA
     # --------------------------------------------------
@@ -71,6 +73,14 @@ def export_report_to_pdf(
     narrative = generate_executive_summary(report)
 
     company = report["company_info"]["company_name"]
+
+    # AI Finance Advisor (if available)
+    try:
+        finance_insights = generate_finance_insights(
+            report.get("kpi_inputs", {})
+        )
+    except Exception:
+        finance_insights = []
 
 
     # --------------------------------------------------
@@ -86,11 +96,12 @@ def export_report_to_pdf(
     # OUTPUT PATH
     # --------------------------------------------------
 
-    Path(output_dir).mkdir(exist_ok=True)
+    out_dir = BASE_DIR / output_dir
+    out_dir.mkdir(exist_ok=True)
 
     filename = f"{company}_Diagnostic_Report_{datetime.now().year}.pdf"
 
-    filepath = Path(output_dir) / filename
+    filepath = out_dir / filename
 
 
     # --------------------------------------------------
@@ -143,11 +154,10 @@ def export_report_to_pdf(
     elements.append(Spacer(1, 40))
 
 
-    # Logo (Branded Only)
-    if brand_mode == "branded":
+    if brand_mode == "branded" and LOGO_PATH.exists():
 
         try:
-            logo = Image(LOGO_PATH, width=120, height=70)
+            logo = Image(str(LOGO_PATH), width=120, height=70)
             logo.hAlign = "CENTER"
 
             elements.append(logo)
@@ -199,7 +209,7 @@ def export_report_to_pdf(
     # ==================================================
 
     elements.append(Paragraph("Executive Summary", header_style))
-    elements.append(Spacer(1, 10))
+    elements.append(Spacer(1, 15))
 
 
     for key in [
@@ -240,7 +250,7 @@ def export_report_to_pdf(
         )
     )
 
-    elements.append(Spacer(1, 20))
+    elements.append(Spacer(1, 25))
 
 
     # ==================================================
@@ -265,7 +275,6 @@ def export_report_to_pdf(
             score = round(float(item.get("score", 0)), 2)
         except:
             score = 0
-
 
         pillar = item.get("pillar")
 
@@ -295,6 +304,43 @@ def export_report_to_pdf(
 
 
     # ==================================================
+    # AI FINANCIAL ADVISOR
+    # ==================================================
+
+    elements.append(
+        Paragraph("AI Financial Advisor Insights", header_style)
+    )
+
+    elements.append(Spacer(1, 15))
+
+
+    if not finance_insights:
+
+        elements.append(
+            Paragraph(
+                "No financial advisory insights available.",
+                styles["Normal"]
+            )
+        )
+
+    else:
+
+        for i, insight in enumerate(finance_insights, 1):
+
+            elements.append(
+                Paragraph(
+                    f"{i}. {insight}",
+                    styles["Normal"]
+                )
+            )
+
+            elements.append(Spacer(1, 5))
+
+
+    elements.append(PageBreak())
+
+
+    # ==================================================
     # SWOT
     # ==================================================
 
@@ -320,6 +366,7 @@ def export_report_to_pdf(
         else:
 
             for i in items:
+
                 elements.append(
                     Paragraph(f"- {i}", styles["Normal"])
                 )

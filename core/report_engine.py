@@ -43,7 +43,6 @@ def generate_report_payload(review_id: int) -> dict:
         "created_at": review[3],
     }
 
-
     # -----------------------------
     # KPI Inputs
     # -----------------------------
@@ -53,27 +52,49 @@ def generate_report_payload(review_id: int) -> dict:
     if not inputs:
         raise ValueError("No KPI inputs found")
 
-
     # -----------------------------
     # Scores
     # -----------------------------
 
     scores, pillars, bhi = compute_scores(inputs)
 
+    # Normalize score format (dict-safe)
+    normalized_scores = []
+
+    for item in scores:
+
+        if isinstance(item, dict):
+
+            normalized_scores.append({
+                "kpi": item.get("kpi_id") or item.get("kpi"),
+                "value": item.get("value") or item.get("raw_value"),
+                "score": item.get("score"),
+                "pillar": item.get("pillar"),
+            })
+
+        elif isinstance(item, (list, tuple)) and len(item) >= 4:
+
+            normalized_scores.append({
+                "kpi": item[0],
+                "value": item[1],
+                "score": item[2],
+                "pillar": item[3],
+            })
 
     # -----------------------------
     # Benchmarking
     # -----------------------------
 
-    benchmarks = compare_to_benchmark(scores, company_info["industry"])
-
+    benchmarks = compare_to_benchmark(
+        normalized_scores,
+        company_info["industry"]
+    )
 
     # -----------------------------
     # SWOT
     # -----------------------------
 
-    swot = generate_swot(scores, benchmarks)
-
+    swot = generate_swot(normalized_scores, benchmarks)
 
     # -----------------------------
     # Recommendations
@@ -81,17 +102,15 @@ def generate_report_payload(review_id: int) -> dict:
 
     recommendations = generate_recommendations(swot)
 
-
     # -----------------------------
     # Meta
     # -----------------------------
 
     meta = {
         "generated_at": datetime.now().isoformat(),
-        "version": "1.0",
-        "engine": "Company Diagnostic Platform",
+        "version": "2.0",
+        "engine": "Chumcred StratIQ",
     }
-
 
     # -----------------------------
     # Final Payload
@@ -100,7 +119,7 @@ def generate_report_payload(review_id: int) -> dict:
     payload = {
         "company_info": company_info,
         "kpi_inputs": inputs,
-        "scores": scores,
+        "scores": normalized_scores,
         "pillars": pillars,
         "bhi": round(bhi, 2),
         "benchmarks": benchmarks,

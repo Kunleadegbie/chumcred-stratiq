@@ -1,31 +1,58 @@
+
+
 import sqlite3
-from pathlib import Path
-
-DB_PATH = Path(__file__).parent / "app.db"
+import os
 
 
+# ==========================================================
+# PATHS
+# ==========================================================
+
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+
+DB_PATH = os.path.join(BASE_DIR, "stratiq.db")
+SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
+
+
+# ==========================================================
+# CONNECTION + AUTO INIT
+# ==========================================================
+
+def get_connection():
+
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+
+    cur = conn.cursor()
+
+    # Check if users table exists
+    cur.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='users'
+    """)
+
+    exists = cur.fetchone()
+
+    # If not, load schema
+    if not exists:
+        with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+            conn.executescript(f.read())
+            conn.commit()
+
+    return conn
+
+
+# Alias (for backward compatibility)
 def get_conn():
-    return sqlite3.connect(DB_PATH)
+    return get_connection()
 
 
-def init_db():
-
-    conn = get_connection()
-
-    import os
-
-    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-    SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
-
-    with open(SCHEMA_PATH) as f:
-        conn.executescript(f.read())
-
-    conn.commit()
-
-
-# ---------------- Reviews ----------------
+# ==========================================================
+# REVIEWS
+# ==========================================================
 
 def create_review(company, industry):
+
     conn = get_conn()
     cur = conn.cursor()
 
@@ -35,25 +62,48 @@ def create_review(company, industry):
     )
 
     conn.commit()
-    review_id = cur.lastrowid
+    rid = cur.lastrowid
     conn.close()
 
-    return review_id
+    return rid
 
 
 def get_reviews():
+
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT id, company_name, industry, created_at FROM reviews ORDER BY id DESC"
-    ).fetchall()
+
+    rows = conn.execute("""
+        SELECT id, company_name, industry, created_at
+        FROM reviews
+        ORDER BY id DESC
+    """).fetchall()
+
     conn.close()
 
     return rows
 
 
-# ---------------- KPI Inputs ----------------
+def get_review_by_id(review_id):
+
+    conn = get_conn()
+
+    row = conn.execute("""
+        SELECT id, company_name, industry, created_at
+        FROM reviews
+        WHERE id=?
+    """, (review_id,)).fetchone()
+
+    conn.close()
+
+    return row
+
+
+# ==========================================================
+# KPI INPUTS
+# ==========================================================
 
 def save_kpi_value(review_id, kpi_id, value):
+
     conn = get_conn()
     cur = conn.cursor()
 
@@ -72,6 +122,7 @@ def save_kpi_value(review_id, kpi_id, value):
 
 
 def get_kpi_inputs(review_id):
+
     conn = get_conn()
 
     rows = conn.execute("""
@@ -85,15 +136,19 @@ def get_kpi_inputs(review_id):
     return dict(rows)
 
 
-# ---------------- Scores ----------------
+# ==========================================================
+# SCORES
+# ==========================================================
 
 def save_scores(review_id, results):
+
     conn = get_conn()
     cur = conn.cursor()
 
     cur.execute("DELETE FROM scores WHERE review_id=?", (review_id,))
 
     for r in results:
+
         cur.execute("""
             INSERT INTO scores
             (review_id, kpi_id, raw_value, score, pillar)
@@ -111,6 +166,7 @@ def save_scores(review_id, results):
 
 
 def get_scores(review_id):
+
     conn = get_conn()
 
     rows = conn.execute("""
@@ -123,20 +179,10 @@ def get_scores(review_id):
 
     return rows
 
-def get_review_by_id(review_id):
-    conn = get_conn()
 
-    row = conn.execute("""
-        SELECT id, company_name, industry, created_at
-        FROM reviews
-        WHERE id=?
-    """, (review_id,)).fetchone()
-
-    conn.close()
-
-    return row
-
-# ---------------- Users ----------------
+# ==========================================================
+# USERS
+# ==========================================================
 
 def create_user(
     email,
@@ -167,9 +213,11 @@ def create_user(
     ))
 
     conn.commit()
+    conn.close()
 
 
 def get_user_by_email(email):
+
     conn = get_conn()
 
     row = conn.execute("""
@@ -181,6 +229,66 @@ def get_user_by_email(email):
     conn.close()
 
     return row
+
+
+def get_all_users():
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, email, full_name, role, is_active
+        FROM users
+        ORDER BY id
+    """)
+
+    rows = cur.fetchall()
+
+    conn.close()
+
+    users = []
+
+    for r in rows:
+
+        users.append({
+            "id": r["id"],
+            "email": r["email"],
+            "full_name": r["full_name"],
+            "role": r["role"],
+            "is_active": r["is_active"]
+        })
+
+    return users
+
+
+def update_user_role(user_id, role):
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE users
+        SET role=?
+        WHERE id=?
+    """, (role, user_id))
+
+    conn.commit()
+    conn.close()
+
+
+def activate_user(user_id):
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE users
+        SET is_active=1
+        WHERE id=?
+    """, (user_id,))
+
+    conn.commit()
+    conn.close()
 
 
 # ==========================================================
@@ -195,52 +303,20 @@ def get_user_subscription(user_id):
     cur.execute("""
         SELECT *
         FROM subscriptions
-        WHERE user_id = ?
-        AND is_active = 1
+        WHERE user_id=?
+        AND is_active=1
         LIMIT 1
     """, (user_id,))
 
     row = cur.fetchone()
 
+    conn.close()
+
     if not row:
         return None
 
-    cols = [c[0] for c in cur.description]
+    return dict(row)
 
-    return dict(zip(cols, row))
-
-
-def increment_reviews(user_id):
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE subscriptions
-        SET used_reviews = used_reviews + 1
-        WHERE user_id = ?
-    """, (user_id,))
-
-    conn.commit()
-
-
-def increment_exports(user_id):
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE subscriptions
-        SET used_exports = used_exports + 1
-        WHERE user_id = ?
-    """, (user_id,))
-
-    conn.commit()
-
-
-# ==========================================================
-# CREATE SUBSCRIPTION
-# ==========================================================
 
 def create_subscription(
     user_id,
@@ -277,92 +353,67 @@ def create_subscription(
     ))
 
     conn.commit()
+    conn.close()
 
-# ==================================================
-# USERS ADMIN
-# ==========================================================
 
-def get_all_users():
+def increment_reviews(user_id):
 
     conn = get_conn()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, email, full_name, role
-        FROM users
-    """)
-
-    rows = cur.fetchall()
-
-    users = []
-
-    for r in rows:
-
-        users.append({
-            "id": r[0],
-            "email": r[1],
-            "full_name": r[2],
-            "role": r[3]
-        })
-
-    return users
-
-
-def update_user_role(user_id, role):
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE users
-        SET role = ?
-        WHERE id = ?
-    """, (role, user_id))
-
-    conn.commit()
-
-def activate_user(user_id):
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE users
-        SET is_active = 1
-        WHERE id = ?
+        UPDATE subscriptions
+        SET used_reviews = used_reviews + 1
+        WHERE user_id=?
     """, (user_id,))
 
     conn.commit()
+    conn.close()
 
-# ==================================================
-# FINANCIAL KPI SAVE
-# ==================================================
 
-def save_financial_kpis(review_id, results):
+def increment_exports(user_id):
 
     conn = get_conn()
     cur = conn.cursor()
 
-    mapping = {
+    cur.execute("""
+        UPDATE subscriptions
+        SET used_exports = used_exports + 1
+        WHERE user_id=?
+    """, (user_id,))
 
-        "rev_cagr": "FIN_REV_GROWTH_YOY",
-        "ebitda_margin": "FIN_EBITDA_MARGIN",
-        "net_margin": "FIN_NET_MARGIN",
-        "roa": "FIN_ROA",
-        "roe": "FIN_ROE",
-        "current_ratio": "FIN_CURRENT_RATIO",
-        "debt_ratio": "FIN_DEBT_RATIO"
+    conn.commit()
+    conn.close()
+
+
+# ==========================================================
+# FINANCIAL KPI SAVE
+# ==========================================================
+
+def save_financial_kpis(review_id, metrics: dict):
+
+    """
+    metrics example:
+    {
+        "FIN_REV_GROWTH_YOY": 12.5,
+        "FIN_EBITDA_MARGIN": 24.3,
+        ...
     }
+    """
 
+    conn = get_conn()
+    cur = conn.cursor()
 
-    for k, v in mapping.items():
+    for kpi_id, value in metrics.items():
 
         cur.execute("""
             INSERT INTO kpi_inputs (review_id, kpi_id, value)
             VALUES (?, ?, ?)
-        """, (review_id, k, round(v * 100, 2)))
-
+        """, (
+            review_id,
+            kpi_id,
+            float(value)
+        ))
 
     conn.commit()
-
-
+    conn.close()

@@ -28,7 +28,7 @@ st.set_page_config(
 
 
 # ==================================================
-# INIT SESSION STATE (FIXED)
+# INIT SESSION STATE
 # ==================================================
 
 if "fin_excel" not in st.session_state:
@@ -85,14 +85,15 @@ if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
+
 if "active_review" not in st.session_state:
     st.warning("Create a review first.")
-    st.switch_page("11_Financial_Analyzer.py")
+    st.switch_page("pages/2_New_Review.py")
     st.stop()
 
 
 # ==================================================
-# UI
+# UI SETUP
 # ==================================================
 
 apply_talentiq_sidebar_style()
@@ -191,7 +192,6 @@ st.subheader("Income Statement (3 Years)")
 
 c1, c2, c3 = st.columns(3)
 
-
 with c1:
 
     rev_y2 = st.number_input("Revenue (Y-2)", 0.0, value=get_val("rev", 0))
@@ -221,7 +221,6 @@ st.subheader("Balance Sheet")
 
 b1, b2, b3 = st.columns(3)
 
-
 with b1:
 
     assets = st.number_input("Total Assets", 0.0, value=get_val("assets"))
@@ -247,10 +246,8 @@ st.subheader("Cash Flow")
 
 cf1, cf2 = st.columns(2)
 
-
 with cf1:
     ocf = st.number_input("Operating Cash Flow", 0.0, value=get_val("ocf"))
-
 
 with cf2:
     capex = st.number_input("CAPEX", 0.0, value=get_val("capex"))
@@ -261,7 +258,6 @@ with cf2:
 # ==================================================
 
 st.divider()
-
 
 if st.button("📈 Analyze Financials"):
 
@@ -291,14 +287,13 @@ if st.button("📈 Analyze Financials"):
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
 
     st.success("Financial Analysis Completed")
-    st.rerun()
 
 
 # ==================================================
 # RESULTS DISPLAY
 # ==================================================
 
-if "finance_results" in st.session_state and st.session_state["finance_results"] is not None:
+if st.session_state["finance_results"]:
 
     results = st.session_state["finance_results"]
 

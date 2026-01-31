@@ -55,7 +55,7 @@ st.session_state["active_review"] = review_id
 
 kpis = load_kpis()
 
-existing = get_kpi_inputs(review_id)
+existing = get_kpi_inputs(review_id) or {}
 
 st.subheader("Enter KPI Values")
 
@@ -68,7 +68,7 @@ with st.form("kpi_form"):
 
         label = f"{cfg['name']} ({kpi_id})"
 
-        default = float(existing.get(kpi_id, 0.0)) if existing else 0.0
+        default = float(existing.get(kpi_id, 0.0))
 
         val = st.number_input(
             label,

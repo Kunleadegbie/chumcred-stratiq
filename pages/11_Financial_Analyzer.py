@@ -354,30 +354,36 @@ if st.session_state["finance_results"]:
 
     if st.button("➡️ Send to KPI Input"):
 
-        results = st.session_state["finance_results"]
+    results = st.session_state.get("finance_results")
+
+    if not results:
+        st.error("Run financial analysis first.")
+        st.stop()
+
+    # Map Financial Metrics → KPI IDs
+    kpi_payload = {
+        "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
+        "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
+        "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
+        "FIN_ROA": round(results.get("roa", 0), 2),
+        "FIN_ROE": round(results.get("roe", 0), 2),
+        "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
+        "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
+    }
+
+    # Save to DB
+    save_financial_kpis(
+        st.session_state["active_review"],
+        kpi_payload
+    )
+
+    st.success("✅ Financial KPIs saved to database")
+
+    st.switch_page("pages/3_Data_Input.py")
 
 
-        # Financial → KPI Mapping
-        kpi_payload = {
-
-            "FIN_REV_GROWTH_YOY": results.get("rev_cagr", 0),
-            "FIN_EBITDA_MARGIN": results.get("ebitda_margin", 0),
-            "FIN_NET_MARGIN": results.get("net_margin", 0),
-
-            "FIN_ROA": results.get("roa", 0),
-            "FIN_ROE": results.get("roe", 0),
-
-            "FIN_CURRENT_RATIO": results.get("current_ratio", 0),
-            "FIN_DEBT_RATIO": results.get("debt_ratio", 0),
-        }
 
 
-        save_financial_kpis(
-            st.session_state["active_review"],
-            kpi_payload
-        )
 
 
-        st.success("✅ Financial KPIs sent to Data Input")
-
-        st.switch_page("pages/3_Data_Input.py")
+  

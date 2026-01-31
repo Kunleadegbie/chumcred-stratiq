@@ -392,18 +392,17 @@ def increment_exports(user_id):
 
 def save_financial_kpis(review_id, metrics: dict):
 
-    """
-    metrics example:
-    {
-        "FIN_REV_GROWTH_YOY": 12.5,
-        "FIN_EBITDA_MARGIN": 24.3,
-        ...
-    }
-    """
-
     conn = get_conn()
     cur = conn.cursor()
 
+    # Remove old financial KPIs first
+    for kpi_id in metrics.keys():
+        cur.execute("""
+            DELETE FROM kpi_inputs
+            WHERE review_id=? AND kpi_id=?
+        """, (review_id, kpi_id))
+
+    # Insert new ones
     for kpi_id, value in metrics.items():
 
         cur.execute("""
@@ -417,3 +416,6 @@ def save_financial_kpis(review_id, metrics: dict):
 
     conn.commit()
     conn.close()
+
+
+

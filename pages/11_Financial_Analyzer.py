@@ -1,12 +1,25 @@
 # ==================================================
 # pages/11_Financial_Analyzer.py — Financial Analyzer
 # ==================================================
-# ==================================================
-# pages/11_Financial_Analyzer.py — Financial Analyzer
-# ==================================================
 
 import os
 import streamlit as st
+
+
+# ==================================================
+# PAGE CONFIG (MUST BE FIRST)
+# ==================================================
+
+st.set_page_config(
+    page_title="Financial Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+
+# ==================================================
+# IMPORTS
+# ==================================================
 
 from core.financial_engine import analyze_financials
 from core.excel_parser import parse_financial_excel
@@ -19,36 +32,51 @@ from components.sidebar import render_sidebar
 from components.styling import apply_talentiq_sidebar_style
 from components.finance_charts import *
 
-import streamlit as st
-from components.styling import apply_talentiq_sidebar_style
+from components.footer import render_footer
+
+
+# ==================================================
+# STYLING + SIDEBAR
+# ==================================================
 
 apply_talentiq_sidebar_style()
-
-# ==================================================
-# PAGE CONFIG (FIRST STREAMLIT CALL)
-# ==================================================
-
-st.set_page_config(
-    page_title="Financial Analyzer",
-    layout="wide"
-)
+render_sidebar()
 
 
 # ==================================================
-# INIT SESSION STATE (FIXED)
+# AUTH CHECK
+# ==================================================
+
+if "user" not in st.session_state:
+    st.switch_page("pages/Login.py")
+    st.stop()
+
+
+# ==================================================
+# ACTIVE REVIEW CHECK
+# ==================================================
+
+if "active_review" not in st.session_state:
+    st.warning("⚠️ Please create a review first before using Financial Analyzer.")
+    st.switch_page("pages/2_New_Review.py")
+    st.stop()
+
+
+# ==================================================
+# SESSION STATE INIT
 # ==================================================
 
 if "fin_excel" not in st.session_state:
-    st.session_state["fin_excel"] = {}
+    st.session_state.fin_excel = {}
 
 if "finance_results" not in st.session_state:
-    st.session_state["finance_results"] = None
+    st.session_state.finance_results = None
 
 if "finance_insights" not in st.session_state:
-    st.session_state["finance_insights"] = []
+    st.session_state.finance_insights = []
 
 if "finance_alerts" not in st.session_state:
-    st.session_state["finance_alerts"] = []
+    st.session_state.finance_alerts = []
 
 
 # ==================================================
@@ -85,25 +113,8 @@ def get_val(key, idx=None, default=0.0):
 
 
 # ==================================================
-# AUTH
+# PAGE HEADER
 # ==================================================
-
-if "user" not in st.session_state:
-    st.switch_page("pages/Login.py")
-    st.stop()
-
-if "active_review" not in st.session_state:
-    st.warning("Create a review first.")
-    st.switch_page("pages/11_Financial_Analyzer.py")
-    st.stop()
-
-
-# ==================================================
-# UI
-# ==================================================
-
-apply_talentiq_sidebar_style()
-render_sidebar()
 
 st.title("📊 Financial Analyzer (3-Year Trend)")
 
@@ -126,7 +137,7 @@ if os.path.exists(TEMPLATE_PATH):
         )
 
 else:
-    st.error("Financial template not found. Contact Admin.")
+    st.error("❌ Financial template not found. Contact Admin.")
 
 
 # ==================================================
@@ -147,31 +158,15 @@ if uploaded:
 
         parsed = parse_financial_excel(uploaded)
 
-        st.success("Template validated successfully.")
-
         rev = parsed["Income_Statement"]
         bs = parsed["Balance_Sheet"]
         cf = parsed["Cash_Flow"]
 
-        st.session_state["fin_excel"] = {
+        st.session_state.fin_excel = {
 
-            "rev": [
-                rev["Revenue"][0],
-                rev["Revenue"][1],
-                rev["Revenue"][2]
-            ],
-
-            "ebitda": [
-                rev["EBITDA"][0],
-                rev["EBITDA"][1],
-                rev["EBITDA"][2]
-            ],
-
-            "profit": [
-                rev["Net Profit"][0],
-                rev["Net Profit"][1],
-                rev["Net Profit"][2]
-            ],
+            "rev": rev["Revenue"],
+            "ebitda": rev["EBITDA"],
+            "profit": rev["Net Profit"],
 
             "assets": bs["Total Assets"][0],
             "equity": bs["Equity"][0],
@@ -185,9 +180,10 @@ if uploaded:
             "capex": cf["CAPEX"][0]
         }
 
+        st.success("✅ Template validated successfully.")
 
     except Exception as e:
-        st.error(str(e))
+        st.error(f"❌ {e}")
 
 
 # ==================================================
@@ -198,23 +194,17 @@ st.subheader("Income Statement (3 Years)")
 
 c1, c2, c3 = st.columns(3)
 
-
 with c1:
-
     rev_y2 = st.number_input("Revenue (Y-2)", 0.0, value=get_val("rev", 0))
     ebitda_y2 = st.number_input("EBITDA (Y-2)", 0.0, value=get_val("ebitda", 0))
     profit_y2 = st.number_input("Net Profit (Y-2)", 0.0, value=get_val("profit", 0))
 
-
 with c2:
-
     rev_y1 = st.number_input("Revenue (Y-1)", 0.0, value=get_val("rev", 1))
     ebitda_y1 = st.number_input("EBITDA (Y-1)", 0.0, value=get_val("ebitda", 1))
     profit_y1 = st.number_input("Net Profit (Y-1)", 0.0, value=get_val("profit", 1))
 
-
 with c3:
-
     rev_y = st.number_input("Revenue (Y)", 0.0, value=get_val("rev", 2))
     ebitda_y = st.number_input("EBITDA (Y)", 0.0, value=get_val("ebitda", 2))
     profit_y = st.number_input("Net Profit (Y)", 0.0, value=get_val("profit", 2))
@@ -228,21 +218,15 @@ st.subheader("Balance Sheet")
 
 b1, b2, b3 = st.columns(3)
 
-
 with b1:
-
     assets = st.number_input("Total Assets", 0.0, value=get_val("assets"))
     equity = st.number_input("Equity", 0.0, value=get_val("equity"))
 
-
 with b2:
-
     current_assets = st.number_input("Current Assets", 0.0, value=get_val("current_assets"))
     current_liabilities = st.number_input("Current Liabilities", 0.0, value=get_val("current_liabilities"))
 
-
 with b3:
-
     debt = st.number_input("Total Debt", 0.0, value=get_val("debt"))
 
 
@@ -254,10 +238,8 @@ st.subheader("Cash Flow")
 
 cf1, cf2 = st.columns(2)
 
-
 with cf1:
     ocf = st.number_input("Operating Cash Flow", 0.0, value=get_val("ocf"))
-
 
 with cf2:
     capex = st.number_input("CAPEX", 0.0, value=get_val("capex"))
@@ -269,8 +251,7 @@ with cf2:
 
 st.divider()
 
-
-if st.button("📈 Analyze Financials"):
+if st.button("📈 Analyze Financials", use_container_width=True):
 
     data = {
 
@@ -290,27 +271,23 @@ if st.button("📈 Analyze Financials"):
         "capex": capex
     }
 
-
     results = analyze_financials(data)
 
-    st.session_state["finance_results"] = results
-    st.session_state["finance_insights"] = generate_finance_insights(results)
-    st.session_state["finance_alerts"] = generate_finance_alerts(results)
+    st.session_state.finance_results = results
+    st.session_state.finance_insights = generate_finance_insights(results)
+    st.session_state.finance_alerts = generate_finance_alerts(results)
 
-    st.success("Financial Analysis Completed")
+    st.success("✅ Financial Analysis Completed")
+
     st.rerun()
 
 
 # ==================================================
-# RESULTS DISPLAY
+# RESULTS
 # ==================================================
 
-if "finance_results" in st.session_state and st.session_state["finance_results"] is not None:
+if st.session_state.finance_results:
 
-    results = st.session_state["finance_results"]
-
-
-    # ---------------- Charts ----------------
 
     st.subheader("📊 Board Financial Charts")
 
@@ -337,22 +314,26 @@ if "finance_results" in st.session_state and st.session_state["finance_results"]
         st.pyplot(plot_cashflow(ocf, capex))
 
 
-    # ---------------- AI Advisor ----------------
+    # ==================================================
+    # AI ADVISOR
+    # ==================================================
 
     st.subheader("🤖 AI Financial Advisor")
 
-    for msg in st.session_state["finance_insights"]:
+    for msg in st.session_state.finance_insights:
         st.info(msg)
 
 
-    # ---------------- Alerts ----------------
+    # ==================================================
+    # ALERTS
+    # ==================================================
 
     st.subheader("🚨 Risk Alerts")
 
-    if not st.session_state["finance_alerts"]:
-        st.success("No critical financial risks detected.")
+    if not st.session_state.finance_alerts:
+        st.success("No critical risks detected.")
 
-    for level, msg in st.session_state["finance_alerts"]:
+    for level, msg in st.session_state.finance_alerts:
 
         if level == "CRITICAL":
             st.error(msg)
@@ -364,23 +345,24 @@ if "finance_results" in st.session_state and st.session_state["finance_results"]
             st.info(msg)
 
 
-    # ---------------- Save ----------------
+    # ==================================================
+    # SAVE TO KPI
+    # ==================================================
 
-    if st.button("➡️ Send to KPI Input"):
+    if st.button("➡️ Send to KPI Input", use_container_width=True):
 
         save_financial_kpis(
-            st.session_state["active_review"],
-            results
+            st.session_state.active_review,
+            st.session_state.finance_results
         )
 
-        st.success("KPIs saved")
+        st.success("KPIs sent successfully")
 
         st.switch_page("pages/3_Data_Input.py")
 
-# other imports
-from components.footer import render_footer
 
-# page code ...
+# ==================================================
+# FOOTER
+# ==================================================
 
 render_footer()
-

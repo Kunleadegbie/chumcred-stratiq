@@ -53,12 +53,16 @@ if "user" not in st.session_state:
 # SIDEBAR + STYLING
 # ==========================================================
 
-from components.sidebar import render_sidebar
-from components.styling import apply_talentiq_sidebar_style
+try:
+    from components.sidebar import render_sidebar
+    from components.styling import apply_talentiq_sidebar_style
 
-render_sidebar()
-apply_talentiq_sidebar_style()
+    render_sidebar()
+    apply_talentiq_sidebar_style()
 
+except Exception as e:
+    st.warning("Navigation system not loaded properly.")
+    print("Sidebar load error:", e)
 
 # ==========================================================
 # MAIN DASHBOARD

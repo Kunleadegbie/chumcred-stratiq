@@ -28,7 +28,7 @@ st.set_page_config(
 
 
 # ==================================================
-# SESSION STATE INIT (PERSIST DATA)
+# SESSION STATE INIT
 # ==================================================
 
 if "fin_excel" not in st.session_state:
@@ -178,7 +178,6 @@ if uploaded:
             "capex": cf["CAPEX"][0]
         }
 
-        st.rerun()
 
     except Exception as e:
         st.error(str(e))
@@ -193,19 +192,19 @@ st.subheader("Income Statement (3 Years)")
 c1, c2, c3 = st.columns(3)
 
 with c1:
-    rev_y2 = st.number_input("Revenue (Y-2)", value=get_val("rev", 0))
-    ebitda_y2 = st.number_input("EBITDA (Y-2)", value=get_val("ebitda", 0))
-    profit_y2 = st.number_input("Net Profit (Y-2)", value=get_val("profit", 0))
+    rev_y2 = st.number_input("Revenue (Y-2)", 0.0, value=get_val("rev", 0))
+    ebitda_y2 = st.number_input("EBITDA (Y-2)", 0.0, value=get_val("ebitda", 0))
+    profit_y2 = st.number_input("Net Profit (Y-2)", 0.0, value=get_val("profit", 0))
 
 with c2:
-    rev_y1 = st.number_input("Revenue (Y-1)", value=get_val("rev", 1))
-    ebitda_y1 = st.number_input("EBITDA (Y-1)", value=get_val("ebitda", 1))
-    profit_y1 = st.number_input("Net Profit (Y-1)", value=get_val("profit", 1))
+    rev_y1 = st.number_input("Revenue (Y-1)", 0.0, value=get_val("rev", 1))
+    ebitda_y1 = st.number_input("EBITDA (Y-1)", 0.0, value=get_val("ebitda", 1))
+    profit_y1 = st.number_input("Net Profit (Y-1)", 0.0, value=get_val("profit", 1))
 
 with c3:
-    rev_y = st.number_input("Revenue (Y)", value=get_val("rev", 2))
-    ebitda_y = st.number_input("EBITDA (Y)", value=get_val("ebitda", 2))
-    profit_y = st.number_input("Net Profit (Y)", value=get_val("profit", 2))
+    rev_y = st.number_input("Revenue (Y)", 0.0, value=get_val("rev", 2))
+    ebitda_y = st.number_input("EBITDA (Y)", 0.0, value=get_val("ebitda", 2))
+    profit_y = st.number_input("Net Profit (Y)", 0.0, value=get_val("profit", 2))
 
 
 # ==================================================
@@ -217,15 +216,15 @@ st.subheader("Balance Sheet")
 b1, b2, b3 = st.columns(3)
 
 with b1:
-    assets = st.number_input("Total Assets", value=get_val("assets"))
-    equity = st.number_input("Equity", value=get_val("equity"))
+    assets = st.number_input("Total Assets", 0.0, value=get_val("assets"))
+    equity = st.number_input("Equity", 0.0, value=get_val("equity"))
 
 with b2:
-    current_assets = st.number_input("Current Assets", value=get_val("current_assets"))
-    current_liabilities = st.number_input("Current Liabilities", value=get_val("current_liabilities"))
+    current_assets = st.number_input("Current Assets", 0.0, value=get_val("current_assets"))
+    current_liabilities = st.number_input("Current Liabilities", 0.0, value=get_val("current_liabilities"))
 
 with b3:
-    debt = st.number_input("Total Debt", value=get_val("debt"))
+    debt = st.number_input("Total Debt", 0.0, value=get_val("debt"))
 
 
 # ==================================================
@@ -237,10 +236,10 @@ st.subheader("Cash Flow")
 cf1, cf2 = st.columns(2)
 
 with cf1:
-    ocf = st.number_input("Operating Cash Flow", value=get_val("ocf"))
+    ocf = st.number_input("Operating Cash Flow", 0.0, value=get_val("ocf"))
 
 with cf2:
-    capex = st.number_input("CAPEX", value=get_val("capex"))
+    capex = st.number_input("CAPEX", 0.0, value=get_val("capex"))
 
 
 # ==================================================
@@ -269,11 +268,14 @@ if st.button("📈 Analyze Financials"):
         "capex": capex
     }
 
-    # Persist inputs
+
+    # Persist raw inputs
     st.session_state["fin_excel"] = data
 
-    # Run analysis
+
+    # Run Engine
     results = analyze_financials(data)
+
 
     # Persist results
     st.session_state["finance_results"] = results
@@ -281,8 +283,6 @@ if st.button("📈 Analyze Financials"):
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
 
     st.success("✅ Financial Analysis Completed")
-
-    st.rerun()
 
 
 # ==================================================
@@ -292,6 +292,7 @@ if st.button("📈 Analyze Financials"):
 if st.session_state["finance_results"]:
 
     results = st.session_state["finance_results"]
+
 
     # ---------------- Charts ----------------
 
@@ -304,12 +305,10 @@ if st.session_state["finance_results"]:
         st.pyplot(plot_profit([profit_y2, profit_y1, profit_y]))
 
     with col2:
-        st.pyplot(
-            plot_ebitda_margin(
-                [rev_y2, rev_y1, rev_y],
-                [ebitda_y2, ebitda_y1, ebitda_y]
-            )
-        )
+        st.pyplot(plot_ebitda_margin(
+            [rev_y2, rev_y1, rev_y],
+            [ebitda_y2, ebitda_y1, ebitda_y]
+        ))
         st.pyplot(plot_debt_ratio(debt, assets))
 
 
@@ -351,36 +350,40 @@ if st.session_state["finance_results"]:
 
     # ---------------- SEND TO KPI ----------------
 
-    st.divider()
+st.divider()
 
-    if st.button("➡️ Send to KPI Input"):
+if st.button("➡️ Send to KPI Input"):
 
-        results = st.session_state.get("finance_results")
+    results = st.session_state.get("finance_results")
 
-        if not results:
-            st.error("Run financial analysis first.")
-            st.stop()
+    if not results:
+        st.error("Run financial analysis first.")
+        st.stop()
 
-        # Map Financial Metrics → KPI IDs
-        kpi_payload = {
+    # Map Financial Metrics → KPI IDs
+    kpi_payload = {
+        "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
+        "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
+        "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
+        "FIN_ROA": round(results.get("roa", 0), 2),
+        "FIN_ROE": round(results.get("roe", 0), 2),
+        "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
+        "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
+    }
 
-            "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
-            "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
-            "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
+    # Save to DB
+    save_financial_kpis(
+           st.session_state["active_review"],
+           kpi_payload
+    )
 
-            "FIN_ROA": round(results.get("roa", 0), 2),
-            "FIN_ROE": round(results.get("roe", 0), 2),
+    st.success("✅ Financial KPIs saved to database")
 
-            "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
-            "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
-        }
+    st.switch_page("pages/3_Data_Input.py")
 
-        # Save to DB
-        save_financial_kpis(
-            st.session_state["active_review"],
-            kpi_payload
-        )
 
-        st.success("✅ Financial KPIs saved to database")
 
-        st.switch_page("pages/3_Data_Input.py")
+
+
+
+  

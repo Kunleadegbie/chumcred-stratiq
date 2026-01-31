@@ -282,6 +282,9 @@ if st.button("📈 Analyze Financials"):
 
     results = analyze_financials(data)
 
+    st.session_state["fin_excel"] = data
+
+
     st.session_state["finance_results"] = results
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)

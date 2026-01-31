@@ -68,7 +68,7 @@ with st.form("kpi_form"):
 
         label = f"{cfg['name']} ({kpi_id})"
 
-        default = existing.get(kpi_id, 0.0)
+        default = float(existing.get(kpi_id, 0.0)) if existing else 0.0
 
         val = st.number_input(
             label,

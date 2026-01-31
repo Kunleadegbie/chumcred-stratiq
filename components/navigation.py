@@ -11,13 +11,13 @@ ROLE_PAGES = {
         ("🏠 Home", "pages/1_Home.py"),
         ("📝 New Review", "pages/2_New_Review.py"),
         ("📊 Data Input", "pages/3_Data_Input.py"),
+        ("💰 Financial Analyzer", "pages/11_Financial_Analyzer.py"),
         ("📈 Scoring", "pages/4_Scoring_Dashboard.py"),
         ("📉 Benchmarking", "pages/5_Benchmarking.py"),
         ("🧩 SWOT", "pages/6_SWOT.py"),
         ("📑 Recommendations", "pages/7_Recommendations.py"),
         ("🤖 Advisor", "pages/9_Advisor.py"),
         ("⚙️ Admin Config", "pages/8_Admin_Config.py"),
-        ("💰 Financial Analyzer", "pages/11_Financial_Analyzer.py"),
     ],
 
     "CEO": [
@@ -26,16 +26,15 @@ ROLE_PAGES = {
         ("📉 Benchmarking", "pages/5_Benchmarking.py"),
         ("📑 Recommendations", "pages/7_Recommendations.py"),
         ("🤖 Advisor", "pages/9_Advisor.py"),
-        ("💰 Financial Analyzer", "pages/11_Financial_Analyzer.py"),
     ],
 
     "Analyst": [
         ("🏠 Home", "pages/1_Home.py"),
         ("📝 New Review", "pages/2_New_Review.py"),
+        ("💰 Financial Analyzer", "pages/11_Financial_Analyzer.py"),
         ("📊 Data Input", "pages/3_Data_Input.py"),
         ("📈 Scoring", "pages/4_Scoring_Dashboard.py"),
         ("🤖 Advisor", "pages/9_Advisor.py"),
-        ("💰 Financial Analyzer", "pages/11_Financial_Analyzer.py"),
     ],
 }
 

@@ -19,6 +19,10 @@ from components.sidebar import render_sidebar
 from components.styling import apply_talentiq_sidebar_style
 from components.finance_charts import *
 
+import streamlit as st
+from components.styling import apply_talentiq_sidebar_style
+
+apply_talentiq_sidebar_style()
 
 # ==================================================
 # PAGE CONFIG (FIRST STREAMLIT CALL)

@@ -1,5 +1,33 @@
 import streamlit as st
 
+# ==========================================================
+# AUTO-BOOTSTRAP ADMIN (RUNS ON FIRST DEPLOY)
+# ==========================================================
+
+from db.repository import get_user_by_email, create_user
+from services.auth import hash_password
+
+
+def bootstrap_admin():
+
+    admin_email = "chumcred@gmail.com"
+
+    existing = get_user_by_email(admin_email)
+
+    if not existing:
+
+        create_user(
+            email=admin_email,
+            name="System Administrator",
+            password_hash=hash_password("admin123"),
+            role="Admin",
+            is_active=1
+        )
+
+        print("Production admin account created.")
+
+
+bootstrap_admin()
 
 # ==========================================================
 # PAGE CONFIG (MUST BE FIRST)

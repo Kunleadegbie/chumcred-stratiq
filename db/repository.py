@@ -7,10 +7,10 @@ import os
 # ==========================================================
 # PATHS
 # ==========================================================
-
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-
+BASE_DIR = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", os.getcwd())
 DB_PATH = os.path.join(BASE_DIR, "stratiq.db")
+
+
 SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
 
 
@@ -391,31 +391,29 @@ def increment_exports(user_id):
 # ==========================================================
 
 def save_financial_kpis(review_id, metrics: dict):
-
+    """
+    metrics example:
+    {
+        "FIN_REV_GROWTH_YOY": 12.5,
+        "FIN_EBITDA_MARGIN": 24.3,
+        ...
+    }
+    """
     conn = get_conn()
     cur = conn.cursor()
 
-    # Remove old financial KPIs first
-    for kpi_id in metrics.keys():
+    for kpi_id, value in metrics.items():
+
+        # Remove previous value for this KPI (so it behaves like UPDATE)
         cur.execute("""
             DELETE FROM kpi_inputs
             WHERE review_id=? AND kpi_id=?
         """, (review_id, kpi_id))
 
-    # Insert new ones
-    for kpi_id, value in metrics.items():
-
         cur.execute("""
             INSERT INTO kpi_inputs (review_id, kpi_id, value)
             VALUES (?, ?, ?)
-        """, (
-            review_id,
-            kpi_id,
-            float(value)
-        ))
+        """, (review_id, kpi_id, float(value)))
 
     conn.commit()
     conn.close()
-
-
-

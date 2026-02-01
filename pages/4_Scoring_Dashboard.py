@@ -219,7 +219,10 @@ user_id = user["id"]
 user_role = user["role"]
 
 
-if user_role in ("Admin", "CEO") and can_export(user_id):
+is_admin = user_role.strip().lower() in ("admin", "ceo")
+has_export = can_export(user_id)
+
+if is_admin and has_export:
 
     brand_mode = st.radio(
         "Report Branding",

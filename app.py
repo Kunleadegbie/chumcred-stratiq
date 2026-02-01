@@ -12,9 +12,9 @@ def bootstrap_admin():
 
     admin_email = "chumcred@gmail.com"
 
-    user = get_user_by_email(admin_email)
+    existing = get_user_by_email(admin_email)
 
-    if not user:
+    if not existing:
 
         create_user(
             email=admin_email,
@@ -24,20 +24,10 @@ def bootstrap_admin():
             is_active=1
         )
 
-    else:
+        print("Production admin created")
 
-        # Force role correction
-        conn = get_conn()
-        cur = conn.cursor()
 
-        cur.execute("""
-            UPDATE users
-            SET role='Admin', is_active=1
-            WHERE email=?
-        """, (admin_email,))
-
-        conn.commit()
-        conn.close()
+bootstrap_admin()
 
 
 # ==========================================================

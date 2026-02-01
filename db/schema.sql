@@ -66,3 +66,13 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 
+CREATE TABLE IF NOT EXISTS financial_raw (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    review_id INTEGER,
+    metric TEXT,
+    value TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+

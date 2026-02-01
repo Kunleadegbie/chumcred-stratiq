@@ -15,6 +15,8 @@ from db.repository import save_financial_kpis
 from components.sidebar import render_sidebar
 from components.styling import apply_talentiq_sidebar_style
 from components.finance_charts import *
+from db.repository import save_financial_kpis, save_financial_raw, load_financial_raw
+
 
 
 # ==================================================
@@ -31,7 +33,12 @@ st.set_page_config(
 # SESSION STATE INIT
 # ==================================================
 
-if "fin_excel" not in st.session_state:
+# Load saved data
+saved_fin = load_financial_raw(st.session_state["active_review"])
+
+if saved_fin:
+    st.session_state["fin_excel"] = saved_fin
+else:
     st.session_state["fin_excel"] = {}
 
 if "finance_results" not in st.session_state:
@@ -147,6 +154,11 @@ if uploaded:
         cf = parsed["Cash_Flow"]
 
         st.session_state["fin_excel"] = {
+        # Save permanently
+        save_financial_raw(
+            st.session_state["active_review"],
+            data
+        )
 
             "rev": [
                 rev["Revenue"][0],

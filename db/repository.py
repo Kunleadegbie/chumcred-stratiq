@@ -425,3 +425,62 @@ def save_financial_kpis(review_id, metrics: dict):
 
     conn.commit()
     conn.close()
+
+# ==========================================================
+# FINANCIAL RAW DATA STORAGE
+# ==========================================================
+
+def save_financial_raw(review_id, data: dict):
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # Remove old
+    cur.execute("""
+        DELETE FROM financial_raw
+        WHERE review_id = ?
+    """, (review_id,))
+
+    # Insert new
+    for k, v in data.items():
+
+        if isinstance(v, list):
+            v = ",".join(map(str, v))
+
+        cur.execute("""
+            INSERT INTO financial_raw
+            (review_id, metric, value)
+            VALUES (?, ?, ?)
+        """, (review_id, k, str(v)))
+
+    conn.commit()
+    conn.close()
+
+
+def load_financial_raw(review_id):
+
+    conn = get_conn()
+
+    rows = conn.execute("""
+        SELECT metric, value
+        FROM financial_raw
+        WHERE review_id=?
+    """, (review_id,)).fetchall()
+
+    conn.close()
+
+    data = {}
+
+    for r in rows:
+
+        val = r["value"]
+
+        if "," in val:
+            val = [float(x) for x in val.split(",")]
+        else:
+            val = float(val)
+
+        data[r["metric"]] = val
+
+    return data
+

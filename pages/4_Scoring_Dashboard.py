@@ -217,6 +217,7 @@ if not user:
 
 user_id = user["id"]
 user_role = user["role"]
+st.write("DEBUG ROLE:", user_role)
 
 
 is_admin = user_role.strip().lower() in ("admin", "ceo")

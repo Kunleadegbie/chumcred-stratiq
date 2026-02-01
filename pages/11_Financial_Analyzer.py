@@ -263,7 +263,6 @@ st.divider()
 if st.button("📈 Analyze Financials"):
 
     data = {
-
         "rev": [rev_y2, rev_y1, rev_y],
         "ebitda": [ebitda_y2, ebitda_y1, ebitda_y],
         "profit": [profit_y2, profit_y1, profit_y],
@@ -280,21 +279,36 @@ if st.button("📈 Analyze Financials"):
         "capex": capex
     }
 
-
-    # Persist raw inputs
-    st.session_state["fin_excel"] = data
-
-
     # Run Engine
     results = analyze_financials(data)
 
+    if not results:
+        st.error("Financial analysis failed.")
+        st.stop()
 
-    # Persist results
-    st.session_state["finance_results"] = results
+    # Map to KPI format
+    kpi_payload = {
+        "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
+        "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
+        "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
+        "FIN_ROA": round(results.get("roa", 0), 2),
+        "FIN_ROE": round(results.get("roe", 0), 2),
+        "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
+        "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
+    }
+
+    # Save to DB (PERSISTENT)
+    save_financial_kpis(
+        st.session_state["active_review"],
+        kpi_payload
+    )
+
+    # Save for UI only
+    st.session_state["finance_results"] = kpi_payload
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
 
-    st.success("✅ Financial Analysis Completed")
+    st.success("✅ Financial KPIs calculated and saved")
 
 
 # ==================================================
@@ -302,6 +316,14 @@ if st.button("📈 Analyze Financials"):
 # ==================================================
 
 if st.session_state["finance_results"]:
+
+st.subheader("📌 Calculated Financial KPIs")
+
+kpis = st.session_state["finance_results"]
+
+for k, v in kpis.items():
+    st.metric(k, v)
+
 
     results = st.session_state["finance_results"]
 

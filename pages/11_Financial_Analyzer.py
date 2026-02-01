@@ -10,45 +10,25 @@ from core.excel_parser import parse_financial_excel
 from core.finance_advisor import generate_finance_insights
 from core.finance_alerts import generate_finance_alerts
 
-from db.repository import save_financial_kpis
+from db.repository import (
+    save_financial_kpis,
+    save_financial_raw,
+    load_financial_raw
+)
 
 from components.sidebar import render_sidebar
 from components.styling import apply_talentiq_sidebar_style
 from components.finance_charts import *
-from db.repository import save_financial_kpis, save_financial_raw, load_financial_raw
-
 
 
 # ==================================================
-# PAGE CONFIG (FIRST CALL)
+# PAGE CONFIG
 # ==================================================
 
 st.set_page_config(
     page_title="Financial Analyzer",
     layout="wide"
 )
-
-
-# ==================================================
-# SESSION STATE INIT
-# ==================================================
-
-# Load saved data
-saved_fin = load_financial_raw(st.session_state["active_review"])
-
-if saved_fin:
-    st.session_state["fin_excel"] = saved_fin
-else:
-    st.session_state["fin_excel"] = {}
-
-if "finance_results" not in st.session_state:
-    st.session_state["finance_results"] = None
-
-if "finance_insights" not in st.session_state:
-    st.session_state["finance_insights"] = []
-
-if "finance_alerts" not in st.session_state:
-    st.session_state["finance_alerts"] = []
 
 
 # ==================================================
@@ -63,6 +43,29 @@ if "active_review" not in st.session_state:
     st.warning("Create a review first.")
     st.switch_page("pages/2_New_Review.py")
     st.stop()
+
+
+# ==================================================
+# SESSION INIT (PERSISTENCE)
+# ==================================================
+
+if "fin_excel" not in st.session_state:
+
+    saved = load_financial_raw(st.session_state["active_review"])
+
+    if saved:
+        st.session_state["fin_excel"] = saved
+    else:
+        st.session_state["fin_excel"] = {}
+
+if "finance_results" not in st.session_state:
+    st.session_state["finance_results"] = None
+
+if "finance_insights" not in st.session_state:
+    st.session_state["finance_insights"] = []
+
+if "finance_alerts" not in st.session_state:
+    st.session_state["finance_alerts"] = []
 
 
 # ==================================================
@@ -90,7 +93,7 @@ TEMPLATE_PATH = os.path.join(
 
 
 # ==================================================
-# SAFE VALUE GETTER
+# SAFE GETTER
 # ==================================================
 
 def get_val(key, idx=None, default=0.0):
@@ -153,12 +156,7 @@ if uploaded:
         bs = parsed["Balance_Sheet"]
         cf = parsed["Cash_Flow"]
 
-        st.session_state["fin_excel"] = {
-        # Save permanently
-        save_financial_raw(
-            st.session_state["active_review"],
-            data
-        )
+        data = {
 
             "rev": [
                 rev["Revenue"][0],
@@ -189,6 +187,14 @@ if uploaded:
             "ocf": cf["Operating Cash Flow"][0],
             "capex": cf["CAPEX"][0]
         }
+
+        # Save permanently
+        save_financial_raw(
+            st.session_state["active_review"],
+            data
+        )
+
+        st.session_state["fin_excel"] = data
 
 
     except Exception as e:
@@ -263,6 +269,7 @@ st.divider()
 if st.button("📈 Analyze Financials"):
 
     data = {
+
         "rev": [rev_y2, rev_y1, rev_y],
         "ebitda": [ebitda_y2, ebitda_y1, ebitda_y],
         "profit": [profit_y2, profit_y1, profit_y],
@@ -279,14 +286,20 @@ if st.button("📈 Analyze Financials"):
         "capex": capex
     }
 
-    # Run Engine
+    # Save raw data
+    save_financial_raw(
+        st.session_state["active_review"],
+        data
+    )
+
+    st.session_state["fin_excel"] = data
+
     results = analyze_financials(data)
 
     if not results:
         st.error("Financial analysis failed.")
         st.stop()
 
-    # Map to KPI format
     kpi_payload = {
         "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
         "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
@@ -297,13 +310,11 @@ if st.button("📈 Analyze Financials"):
         "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
     }
 
-    # Save to DB (PERSISTENT)
     save_financial_kpis(
         st.session_state["active_review"],
         kpi_payload
     )
 
-    # Save for UI only
     st.session_state["finance_results"] = kpi_payload
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
@@ -317,15 +328,12 @@ if st.button("📈 Analyze Financials"):
 
 if st.session_state["finance_results"]:
 
-st.subheader("📌 Calculated Financial KPIs")
+    st.subheader("📌 Calculated Financial KPIs")
 
-kpis = st.session_state["finance_results"]
+    kpis = st.session_state["finance_results"]
 
-for k, v in kpis.items():
-    st.metric(k, v)
-
-
-    results = st.session_state["finance_results"]
+    for k, v in kpis.items():
+        st.metric(k, v)
 
 
     # ---------------- Charts ----------------
@@ -382,42 +390,16 @@ for k, v in kpis.items():
             st.info(msg)
 
 
-    # ---------------- SEND TO KPI ----------------
+# ==================================================
+# SEND TO KPI
+# ==================================================
 
 st.divider()
 
 if st.button("➡️ Send to KPI Input"):
 
-    results = st.session_state.get("finance_results")
-
-    if not results:
+    if not st.session_state.get("finance_results"):
         st.error("Run financial analysis first.")
         st.stop()
 
-    # Map Financial Metrics → KPI IDs
-    kpi_payload = {
-        "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
-        "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
-        "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
-        "FIN_ROA": round(results.get("roa", 0), 2),
-        "FIN_ROE": round(results.get("roe", 0), 2),
-        "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
-        "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
-    }
-
-    # Save to DB
-    save_financial_kpis(
-           st.session_state["active_review"],
-           kpi_payload
-    )
-
-    st.success("✅ Financial KPIs saved to database")
-
     st.switch_page("pages/3_Data_Input.py")
-
-
-
-
-
-
-  

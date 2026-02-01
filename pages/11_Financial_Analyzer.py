@@ -10,13 +10,11 @@ from core.excel_parser import parse_financial_excel
 from core.finance_advisor import generate_finance_insights
 from core.finance_alerts import generate_finance_alerts
 
-from db.repository import save_financial_kpis, get_kpi_inputs
+from db.repository import save_financial_kpis
 
 from components.sidebar import render_sidebar
 from components.styling import apply_talentiq_sidebar_style
 from components.finance_charts import *
-
-from components.footer import render_footer
 
 
 # ==================================================
@@ -44,9 +42,6 @@ if "finance_insights" not in st.session_state:
 
 if "finance_alerts" not in st.session_state:
     st.session_state["finance_alerts"] = []
-
-if "finance_kpi_payload" not in st.session_state:
-    st.session_state["finance_kpi_payload"] = {}
 
 
 # ==================================================
@@ -92,11 +87,16 @@ TEMPLATE_PATH = os.path.join(
 # ==================================================
 
 def get_val(key, idx=None, default=0.0):
+
     data = st.session_state.get("fin_excel", {})
+
     try:
+
         if idx is None:
             return float(data.get(key, default))
+
         return float(data.get(key, [default])[idx])
+
     except Exception:
         return float(default)
 
@@ -108,13 +108,16 @@ def get_val(key, idx=None, default=0.0):
 st.subheader("📥 Excel Template")
 
 if os.path.exists(TEMPLATE_PATH):
+
     with open(TEMPLATE_PATH, "rb") as f:
+
         st.download_button(
             "Download Financial Template",
             f,
             file_name="financial_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 else:
     st.error("Financial template not found. Contact Admin.")
 
@@ -125,11 +128,18 @@ else:
 
 st.subheader("📤 Upload Completed Template")
 
-uploaded = st.file_uploader("Upload Excel File", type=["xlsx"])
+uploaded = st.file_uploader(
+    "Upload Excel File",
+    type=["xlsx"]
+)
+
 
 if uploaded:
+
     try:
+
         parsed = parse_financial_excel(uploaded)
+
         st.success("Template validated successfully.")
 
         rev = parsed["Income_Statement"]
@@ -137,20 +147,37 @@ if uploaded:
         cf = parsed["Cash_Flow"]
 
         st.session_state["fin_excel"] = {
-            "rev": [rev["Revenue"][0], rev["Revenue"][1], rev["Revenue"][2]],
-            "ebitda": [rev["EBITDA"][0], rev["EBITDA"][1], rev["EBITDA"][2]],
-            "profit": [rev["Net Profit"][0], rev["Net Profit"][1], rev["Net Profit"][2]],
+
+            "rev": [
+                rev["Revenue"][0],
+                rev["Revenue"][1],
+                rev["Revenue"][2]
+            ],
+
+            "ebitda": [
+                rev["EBITDA"][0],
+                rev["EBITDA"][1],
+                rev["EBITDA"][2]
+            ],
+
+            "profit": [
+                rev["Net Profit"][0],
+                rev["Net Profit"][1],
+                rev["Net Profit"][2]
+            ],
+
             "assets": bs["Total Assets"][0],
             "equity": bs["Equity"][0],
+
             "current_assets": bs["Current Assets"][0],
             "current_liabilities": bs["Current Liabilities"][0],
+
             "debt": bs["Total Debt"][0],
+
             "ocf": cf["Operating Cash Flow"][0],
-            "capex": cf["CAPEX"][0],
+            "capex": cf["CAPEX"][0]
         }
 
-        st.info("Excel values loaded into the form below. Click **Analyze Financials** to generate KPIs.")
-        st.rerun()
 
     except Exception as e:
         st.error(str(e))
@@ -224,64 +251,51 @@ st.divider()
 if st.button("📈 Analyze Financials"):
 
     data = {
+
         "rev": [rev_y2, rev_y1, rev_y],
         "ebitda": [ebitda_y2, ebitda_y1, ebitda_y],
         "profit": [profit_y2, profit_y1, profit_y],
+
         "assets": assets,
         "equity": equity,
+
         "current_assets": current_assets,
         "current_liabilities": current_liabilities,
+
         "debt": debt,
+
         "ocf": ocf,
         "capex": capex
     }
 
+
+    # Persist raw inputs
     st.session_state["fin_excel"] = data
 
+
+    # Run Engine
     results = analyze_financials(data)
 
+
+    # Persist results
     st.session_state["finance_results"] = results
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
 
-    # Map Financial Results → KPI IDs (the exact ones you listed)
-    kpi_payload = {
-        "FIN_REV_GROWTH_YOY": round(float(results.get("rev_cagr", 0) or 0), 2),
-        "FIN_EBITDA_MARGIN": round(float(results.get("ebitda_margin", 0) or 0), 2),
-        "FIN_NET_MARGIN": round(float(results.get("net_margin", 0) or 0), 2),
-        "FIN_ROA": round(float(results.get("roa", 0) or 0), 2),
-        "FIN_ROE": round(float(results.get("roe", 0) or 0), 2),
-        "FIN_CURRENT_RATIO": round(float(results.get("current_ratio", 0) or 0), 2),
-        "FIN_DEBT_RATIO": round(float(results.get("debt_ratio", 0) or 0), 2),
-    }
-
-    st.session_state["finance_kpi_payload"] = kpi_payload
-
     st.success("✅ Financial Analysis Completed")
-    st.rerun()
 
 
 # ==================================================
 # RESULTS
 # ==================================================
 
-if st.session_state.get("finance_results"):
+if st.session_state["finance_results"]:
 
     results = st.session_state["finance_results"]
 
-    st.subheader("✅ Financial KPI Output (Auto-calculated)")
-
-    # Always show the KPI payload clearly (manual copy fallback)
-    kpi_payload = st.session_state.get("finance_kpi_payload", {})
-    if kpi_payload:
-        st.dataframe(
-            [{"KPI_ID": k, "Value": v} for k, v in kpi_payload.items()],
-            use_container_width=True
-        )
-    else:
-        st.info("Click **Analyze Financials** to generate KPI output.")
 
     # ---------------- Charts ----------------
+
     st.subheader("📊 Board Financial Charts")
 
     col1, col2 = st.columns(2)
@@ -297,6 +311,7 @@ if st.session_state.get("finance_results"):
         ))
         st.pyplot(plot_debt_ratio(debt, assets))
 
+
     col3, col4 = st.columns(2)
 
     with col3:
@@ -305,48 +320,70 @@ if st.session_state.get("finance_results"):
     with col4:
         st.pyplot(plot_cashflow(ocf, capex))
 
+
     # ---------------- AI Advisor ----------------
+
     st.subheader("🤖 AI Financial Advisor")
 
-    insights = st.session_state.get("finance_insights", [])
-    if not insights:
-        st.info("No AI insights yet. Run **Analyze Financials**.")
-    else:
-        for msg in insights:
-            st.info(msg)
+    for msg in st.session_state["finance_insights"]:
+        st.info(msg)
+
 
     # ---------------- Alerts ----------------
+
     st.subheader("🚨 Risk Alerts")
 
-    alerts = st.session_state.get("finance_alerts", [])
-    if not alerts:
+    if not st.session_state["finance_alerts"]:
         st.success("No critical financial risks detected.")
-    else:
-        for level, msg in alerts:
-            if level == "CRITICAL":
-                st.error(msg)
-            elif level == "HIGH":
-                st.warning(msg)
-            else:
-                st.info(msg)
+
+    for level, msg in st.session_state["finance_alerts"]:
+
+        if level == "CRITICAL":
+            st.error(msg)
+
+        elif level == "HIGH":
+            st.warning(msg)
+
+        else:
+            st.info(msg)
+
 
     # ---------------- SEND TO KPI ----------------
-    st.divider()
 
-    if st.button("➡️ Send to KPI Input"):
+st.divider()
 
-        kpi_payload = st.session_state.get("finance_kpi_payload", {})
-        if not kpi_payload:
-            st.error("Run financial analysis first.")
-            render_footer()
-            st.stop()
+if st.button("➡️ Send to KPI Input"):
 
-        save_financial_kpis(
-            st.session_state["active_review"],
-            kpi_payload
-        )
+    results = st.session_state.get("finance_results")
 
-        st.success("✅ Financial KPIs saved to database and ready in Data Input.")
-        st.switch_page("pages/3_Data_Input.py")
+    if not results:
+        st.error("Run financial analysis first.")
+        st.stop()
 
-render_footer()
+    # Map Financial Metrics → KPI IDs
+    kpi_payload = {
+        "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
+        "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
+        "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
+        "FIN_ROA": round(results.get("roa", 0), 2),
+        "FIN_ROE": round(results.get("roe", 0), 2),
+        "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
+        "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
+    }
+
+    # Save to DB
+    save_financial_kpis(
+           st.session_state["active_review"],
+           kpi_payload
+    )
+
+    st.success("✅ Financial KPIs saved to database")
+
+    st.switch_page("pages/3_Data_Input.py")
+
+
+
+
+
+
+  

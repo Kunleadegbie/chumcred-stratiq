@@ -7,11 +7,15 @@ import os
 # ==========================================================
 # PATHS
 # ==========================================================
-BASE_DIR = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", os.getcwd())
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
 DB_PATH = os.path.join(BASE_DIR, "stratiq.db")
 
-
-SCHEMA_PATH = os.path.join(BASE_DIR, "db", "schema.sql")
+SCHEMA_PATH = os.path.join(
+    BASE_DIR,
+    "db",
+    "schema.sql"
+)
 
 
 # ==========================================================
@@ -35,7 +39,11 @@ def get_connection():
 
     # If not, load schema
     if not exists:
+        if not os.path.exists(SCHEMA_PATH):
+            raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
+
         with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+
             conn.executescript(f.read())
             conn.commit()
 

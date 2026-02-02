@@ -1,15 +1,18 @@
-
-
 import sqlite3
 import os
+import json
+from pathlib import Path
 
 
 # ==========================================================
-# PATHS
+# PATHS (RAILWAY-SAFE)
 # ==========================================================
-DB_PATH = "/data/stratiq.db"
 
-SCHEMA_PATH = "/app/db/schema.sql"
+BASE_DIR = Path(__file__).resolve().parents[1]  # /app
+SCHEMA_PATH = BASE_DIR / "db" / "schema.sql"
+
+# Prefer persistent volume path on Railway (set env var)
+DB_PATH = os.getenv("STRATIQ_DB_PATH", str(BASE_DIR / "stratiq.db"))
 
 
 # ==========================================================
@@ -33,13 +36,71 @@ def get_connection():
 
     # If not, load schema
     if not exists:
-        if not os.path.exists(SCHEMA_PATH):
-            raise FileNotFoundError(f"Schema file not found: {SCHEMA_PATH}")
+        if SCHEMA_PATH.exists():
+            with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+                conn.executescript(f.read())
+                conn.commit()
+        else:
+            # Minimal fallback schema (prevents crash if schema.sql missing)
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    email TEXT UNIQUE,
+                    full_name TEXT,
+                    password_hash TEXT,
+                    role TEXT DEFAULT 'Pending',
+                    is_active INTEGER DEFAULT 0
+                );
 
-        with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+                CREATE TABLE IF NOT EXISTS reviews (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_name TEXT,
+                    industry TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
 
-            conn.executescript(f.read())
+                CREATE TABLE IF NOT EXISTS kpi_inputs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    review_id INTEGER,
+                    kpi_id TEXT,
+                    value REAL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS scores (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    review_id INTEGER,
+                    kpi_id TEXT,
+                    raw_value REAL,
+                    score REAL,
+                    pillar TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    plan TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    max_reviews INTEGER,
+                    max_exports INTEGER,
+                    used_reviews INTEGER DEFAULT 0,
+                    used_exports INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 1
+                );
+            """)
             conn.commit()
+
+    # Ensure persistence table exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS financial_raw (
+            review_id INTEGER PRIMARY KEY,
+            payload TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
 
     return conn
 
@@ -117,7 +178,7 @@ def save_kpi_value(review_id, kpi_id, value):
     cur.execute("""
         INSERT INTO kpi_inputs (review_id, kpi_id, value)
         VALUES (?, ?, ?)
-    """, (review_id, kpi_id, value))
+    """, (review_id, kpi_id, float(value)))
 
     conn.commit()
     conn.close()
@@ -150,7 +211,6 @@ def save_scores(review_id, results):
     cur.execute("DELETE FROM scores WHERE review_id=?", (review_id,))
 
     for r in results:
-
         cur.execute("""
             INSERT INTO scores
             (review_id, kpi_id, raw_value, score, pillar)
@@ -251,7 +311,6 @@ def get_all_users():
     users = []
 
     for r in rows:
-
         users.append({
             "id": r["id"],
             "email": r["email"],
@@ -389,63 +448,23 @@ def increment_exports(user_id):
 
 
 # ==========================================================
-# FINANCIAL KPI SAVE
+# FINANCIAL RAW (PERSISTENCE)
 # ==========================================================
 
-def save_financial_kpis(review_id, metrics: dict):
-    """
-    metrics example:
-    {
-        "FIN_REV_GROWTH_YOY": 12.5,
-        "FIN_EBITDA_MARGIN": 24.3,
-        ...
-    }
-    """
-    conn = get_conn()
-    cur = conn.cursor()
-
-    for kpi_id, value in metrics.items():
-
-        # Remove previous value for this KPI (so it behaves like UPDATE)
-        cur.execute("""
-            DELETE FROM kpi_inputs
-            WHERE review_id=? AND kpi_id=?
-        """, (review_id, kpi_id))
-
-        cur.execute("""
-            INSERT INTO kpi_inputs (review_id, kpi_id, value)
-            VALUES (?, ?, ?)
-        """, (review_id, kpi_id, float(value)))
-
-    conn.commit()
-    conn.close()
-
-# ==========================================================
-# FINANCIAL RAW DATA STORAGE
-# ==========================================================
-
-def save_financial_raw(review_id, data: dict):
+def save_financial_raw(review_id, payload: dict):
 
     conn = get_conn()
     cur = conn.cursor()
 
-    # Remove old
     cur.execute("""
-        DELETE FROM financial_raw
-        WHERE review_id = ?
-    """, (review_id,))
-
-    # Insert new
-    for k, v in data.items():
-
-        if isinstance(v, list):
-            v = ",".join(map(str, v))
-
-        cur.execute("""
-            INSERT INTO financial_raw
-            (review_id, metric, value)
-            VALUES (?, ?, ?)
-        """, (review_id, k, str(v)))
+        INSERT INTO financial_raw (review_id, payload, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(review_id)
+        DO UPDATE SET payload=excluded.payload, updated_at=CURRENT_TIMESTAMP
+    """, (
+        int(review_id),
+        json.dumps(payload)
+    ))
 
     conn.commit()
     conn.close()
@@ -454,27 +473,39 @@ def save_financial_raw(review_id, data: dict):
 def load_financial_raw(review_id):
 
     conn = get_conn()
+    cur = conn.cursor()
 
-    rows = conn.execute("""
-        SELECT metric, value
+    cur.execute("""
+        SELECT payload
         FROM financial_raw
         WHERE review_id=?
-    """, (review_id,)).fetchall()
+        LIMIT 1
+    """, (int(review_id),))
 
+    row = cur.fetchone()
     conn.close()
 
-    data = {}
+    if not row:
+        return None
 
-    for r in rows:
+    try:
+        return json.loads(row["payload"])
+    except Exception:
+        return None
 
-        val = r["value"]
 
-        if "," in val:
-            val = [float(x) for x in val.split(",")]
-        else:
-            val = float(val)
+# ==========================================================
+# FINANCIAL KPI SAVE (ALIGNED WITH KPI INPUTS)
+# ==========================================================
 
-        data[r["metric"]] = val
-
-    return data
-
+def save_financial_kpis(review_id, metrics: dict):
+    """
+    metrics example:
+    {
+        "FIN_REV_GROWTH": 12.5,
+        "FIN_PROFIT_MARGIN": 24.3,
+        "OPS_COST_RATIO": 18.2
+    }
+    """
+    for kpi_id, value in metrics.items():
+        save_kpi_value(review_id, kpi_id, float(value))

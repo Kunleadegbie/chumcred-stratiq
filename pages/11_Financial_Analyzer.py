@@ -13,7 +13,9 @@ from core.finance_alerts import generate_finance_alerts
 from db.repository import (
     save_financial_kpis,
     save_financial_raw,
-    load_financial_raw
+    load_financial_raw,
+    get_reviews,
+    get_kpi_inputs
 )
 
 from components.sidebar import render_sidebar
@@ -39,10 +41,21 @@ if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
+
+# ==================================================
+# ACTIVE REVIEW (SURVIVE RELOAD)
+# ==================================================
+
+# On browser refresh, Streamlit session_state may be empty on Railway.
+# Instead of forcing New Review, recover by selecting the latest review.
 if "active_review" not in st.session_state:
-    st.warning("Create a review first.")
-    st.switch_page("pages/2_New_Review.py")
-    st.stop()
+    reviews = get_reviews()
+    if reviews:
+        st.session_state["active_review"] = reviews[0][0]  # latest (ORDER BY id DESC)
+    else:
+        st.warning("Create a review first.")
+        st.switch_page("pages/2_New_Review.py")
+        st.stop()
 
 
 # ==================================================
@@ -50,16 +63,18 @@ if "active_review" not in st.session_state:
 # ==================================================
 
 if "fin_excel" not in st.session_state:
-
     saved = load_financial_raw(st.session_state["active_review"])
-
-    if saved:
-        st.session_state["fin_excel"] = saved
-    else:
-        st.session_state["fin_excel"] = {}
+    st.session_state["fin_excel"] = saved if saved else {}
 
 if "finance_results" not in st.session_state:
-    st.session_state["finance_results"] = None
+    # If we already saved KPIs to DB before, preload them so they show after reload
+    existing = get_kpi_inputs(st.session_state["active_review"]) or {}
+    preload = {}
+    if "FIN_REV_GROWTH" in existing:
+        preload["FIN_REV_GROWTH"] = float(existing.get("FIN_REV_GROWTH") or 0.0)
+    if "FIN_PROFIT_MARGIN" in existing:
+        preload["FIN_PROFIT_MARGIN"] = float(existing.get("FIN_PROFIT_MARGIN") or 0.0)
+    st.session_state["finance_results"] = preload if preload else None
 
 if "finance_insights" not in st.session_state:
     st.session_state["finance_insights"] = []
@@ -101,12 +116,9 @@ def get_val(key, idx=None, default=0.0):
     data = st.session_state.get("fin_excel", {})
 
     try:
-
         if idx is None:
             return float(data.get(key, default))
-
         return float(data.get(key, [default])[idx])
-
     except Exception:
         return float(default)
 
@@ -142,7 +154,6 @@ uploaded = st.file_uploader(
     "Upload Excel File",
     type=["xlsx"]
 )
-
 
 if uploaded:
 
@@ -195,7 +206,6 @@ if uploaded:
         )
 
         st.session_state["fin_excel"] = data
-
 
     except Exception as e:
         st.error(str(e))
@@ -300,15 +310,29 @@ if st.button("📈 Analyze Financials"):
         st.error("Financial analysis failed.")
         st.stop()
 
-    # KPI Mapping
+    # ==================================================
+    # KPI Mapping (ALIGN WITH data/kpi_definitions.json)
+    # ==================================================
+    # FIN_REV_GROWTH   -> Revenue Growth (YoY) in percent
+    # FIN_PROFIT_MARGIN -> Profit Margin (Net Profit / Revenue) in percent
+
+    rev_curr = float(rev_y) if rev_y else 0.0
+    rev_prev = float(rev_y1) if rev_y1 else 0.0
+    prof_curr = float(profit_y) if profit_y else 0.0
+
+    if rev_prev != 0:
+        fin_rev_growth = ((rev_curr - rev_prev) / rev_prev) * 100.0
+    else:
+        fin_rev_growth = 0.0
+
+    if rev_curr != 0:
+        fin_profit_margin = (prof_curr / rev_curr) * 100.0
+    else:
+        fin_profit_margin = 0.0
+
     kpi_payload = {
-        "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
-        "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
-        "FIN_NET_MARGIN": round(results.get("net_margin", 0), 2),
-        "FIN_ROA": round(results.get("roa", 0), 2),
-        "FIN_ROE": round(results.get("roe", 0), 2),
-        "FIN_CURRENT_RATIO": round(results.get("current_ratio", 0), 2),
-        "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
+        "FIN_REV_GROWTH": round(fin_rev_growth, 2),
+        "FIN_PROFIT_MARGIN": round(fin_profit_margin, 2)
     }
 
     # Save KPIs
@@ -317,6 +341,7 @@ if st.button("📈 Analyze Financials"):
         kpi_payload
     )
 
+    # Persist for display
     st.session_state["finance_results"] = kpi_payload
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
@@ -328,15 +353,20 @@ if st.button("📈 Analyze Financials"):
 # RESULTS
 # ==================================================
 
-if st.session_state["finance_results"]:
+if st.session_state.get("finance_results"):
 
-    st.subheader("📌 Calculated Financial KPIs")
+    st.subheader("📌 Calculated Financial KPIs (Aligned with KPI Definitions)")
 
     kpis = st.session_state["finance_results"]
 
-    for k, v in kpis.items():
-        st.metric(k, v)
+    # Nice display + easy to copy manually
+    colA, colB = st.columns(2)
+    with colA:
+        st.metric("FIN_REV_GROWTH (Revenue Growth YoY %)", kpis.get("FIN_REV_GROWTH", 0.0))
+    with colB:
+        st.metric("FIN_PROFIT_MARGIN (Profit Margin %)", kpis.get("FIN_PROFIT_MARGIN", 0.0))
 
+    st.caption("These KPIs are saved to the database and should appear in the Data Input page for the same review.")
 
     # ---------------- Charts ----------------
 
@@ -355,7 +385,6 @@ if st.session_state["finance_results"]:
         ))
         st.pyplot(plot_debt_ratio(debt, assets))
 
-
     col3, col4 = st.columns(2)
 
     with col3:
@@ -364,30 +393,26 @@ if st.session_state["finance_results"]:
     with col4:
         st.pyplot(plot_cashflow(ocf, capex))
 
-
     # ---------------- AI Advisor ----------------
 
     st.subheader("🤖 AI Financial Advisor")
 
-    for msg in st.session_state["finance_insights"]:
+    for msg in st.session_state.get("finance_insights", []):
         st.info(msg)
-
 
     # ---------------- Alerts ----------------
 
     st.subheader("🚨 Risk Alerts")
 
-    if not st.session_state["finance_alerts"]:
+    if not st.session_state.get("finance_alerts"):
         st.success("No critical financial risks detected.")
 
-    for level, msg in st.session_state["finance_alerts"]:
+    for level, msg in st.session_state.get("finance_alerts", []):
 
         if level == "CRITICAL":
             st.error(msg)
-
         elif level == "HIGH":
             st.warning(msg)
-
         else:
             st.info(msg)
 

@@ -51,9 +51,8 @@ if not reviews:
 review_labels = [f"{r[1]} (#{r[0]})" for r in reviews]
 review_map = {label: r[0] for label, r in zip(review_labels, reviews)}
 
-# Persist selection across reruns
+# Persist selection across reruns (within a session)
 if "selected_review_label" not in st.session_state:
-    # if active_review exists, try to match it
     active_review = st.session_state.get("active_review")
     if active_review:
         match = None
@@ -85,6 +84,11 @@ existing = get_kpi_inputs(review_id)  # dict(kpi_id -> value)
 
 st.subheader("Enter KPI Values")
 
+# Flash message flag
+if st.session_state.get("kpi_saved_success"):
+    st.success("✅ KPI data saved.")
+    st.session_state["kpi_saved_success"] = False
+
 with st.form("kpi_form", clear_on_submit=False):
 
     inputs = {}
@@ -99,7 +103,12 @@ with st.form("kpi_form", clear_on_submit=False):
         except Exception:
             default = 0.0
 
-        val = st.number_input(label, value=default)
+        # Unique widget key ensures stability across reruns/navigation
+        widget_key = f"kpi__{review_id}__{kpi_id}"
+        if widget_key not in st.session_state:
+            st.session_state[widget_key] = default
+
+        val = st.number_input(label, key=widget_key)
         inputs[kpi_id] = val
 
     submitted = st.form_submit_button("Save KPI Data")
@@ -108,7 +117,8 @@ with st.form("kpi_form", clear_on_submit=False):
         for k, v in inputs.items():
             save_kpi_value(review_id, k, v)
 
-        st.success("✅ KPI data saved.")
+        # show success on next rerun too
+        st.session_state["kpi_saved_success"] = True
         st.rerun()
 
 render_footer()

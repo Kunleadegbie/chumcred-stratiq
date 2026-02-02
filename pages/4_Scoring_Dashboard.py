@@ -107,6 +107,8 @@ if st.button("⚙️ Compute Scores"):
         results, pillars, bhi = compute_scores(inputs)
 
         save_scores(review_id, results)
+        conn.commit()
+
 
     st.success("✅ Scores computed successfully.")
 

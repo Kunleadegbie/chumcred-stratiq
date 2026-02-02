@@ -286,7 +286,7 @@ if st.button("📈 Analyze Financials"):
         "capex": capex
     }
 
-    # Save raw data
+    # Save raw permanently
     save_financial_raw(
         st.session_state["active_review"],
         data
@@ -300,6 +300,7 @@ if st.button("📈 Analyze Financials"):
         st.error("Financial analysis failed.")
         st.stop()
 
+    # KPI Mapping
     kpi_payload = {
         "FIN_REV_GROWTH_YOY": round(results.get("rev_cagr", 0), 2),
         "FIN_EBITDA_MARGIN": round(results.get("ebitda_margin", 0), 2),
@@ -310,6 +311,7 @@ if st.button("📈 Analyze Financials"):
         "FIN_DEBT_RATIO": round(results.get("debt_ratio", 0), 2),
     }
 
+    # Save KPIs
     save_financial_kpis(
         st.session_state["active_review"],
         kpi_payload

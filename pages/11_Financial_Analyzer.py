@@ -14,7 +14,6 @@ from db.repository import (
     save_financial_kpis,
     save_financial_raw,
     load_financial_raw,
-    get_reviews,
     get_kpi_inputs
 )
 
@@ -41,21 +40,10 @@ if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
-
-# ==================================================
-# ACTIVE REVIEW (SURVIVE RELOAD)
-# ==================================================
-
-# On browser refresh, Streamlit session_state may be empty on Railway.
-# Instead of forcing New Review, recover by selecting the latest review.
 if "active_review" not in st.session_state:
-    reviews = get_reviews()
-    if reviews:
-        st.session_state["active_review"] = reviews[0][0]  # latest (ORDER BY id DESC)
-    else:
-        st.warning("Create a review first.")
-        st.switch_page("pages/2_New_Review.py")
-        st.stop()
+    st.warning("Create a review first.")
+    st.switch_page("pages/2_New_Review.py")
+    st.stop()
 
 
 # ==================================================
@@ -67,14 +55,7 @@ if "fin_excel" not in st.session_state:
     st.session_state["fin_excel"] = saved if saved else {}
 
 if "finance_results" not in st.session_state:
-    # If we already saved KPIs to DB before, preload them so they show after reload
-    existing = get_kpi_inputs(st.session_state["active_review"]) or {}
-    preload = {}
-    if "FIN_REV_GROWTH" in existing:
-        preload["FIN_REV_GROWTH"] = float(existing.get("FIN_REV_GROWTH") or 0.0)
-    if "FIN_PROFIT_MARGIN" in existing:
-        preload["FIN_PROFIT_MARGIN"] = float(existing.get("FIN_PROFIT_MARGIN") or 0.0)
-    st.session_state["finance_results"] = preload if preload else None
+    st.session_state["finance_results"] = None
 
 if "finance_insights" not in st.session_state:
     st.session_state["finance_insights"] = []
@@ -108,19 +89,28 @@ TEMPLATE_PATH = os.path.join(
 
 
 # ==================================================
-# SAFE GETTER
+# HELPERS
 # ==================================================
 
 def get_val(key, idx=None, default=0.0):
-
     data = st.session_state.get("fin_excel", {})
-
     try:
         if idx is None:
             return float(data.get(key, default))
         return float(data.get(key, [default])[idx])
     except Exception:
         return float(default)
+
+
+def pct(n, d):
+    try:
+        n = float(n)
+        d = float(d)
+        if d == 0:
+            return 0.0
+        return round((n / d) * 100.0, 2)
+    except Exception:
+        return 0.0
 
 
 # ==================================================
@@ -130,16 +120,13 @@ def get_val(key, idx=None, default=0.0):
 st.subheader("📥 Excel Template")
 
 if os.path.exists(TEMPLATE_PATH):
-
     with open(TEMPLATE_PATH, "rb") as f:
-
         st.download_button(
             "Download Financial Template",
             f,
             file_name="financial_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
 else:
     st.error("Financial template not found. Contact Admin.")
 
@@ -156,11 +143,8 @@ uploaded = st.file_uploader(
 )
 
 if uploaded:
-
     try:
-
         parsed = parse_financial_excel(uploaded)
-
         st.success("Template validated successfully.")
 
         rev = parsed["Income_Statement"]
@@ -168,43 +152,20 @@ if uploaded:
         cf = parsed["Cash_Flow"]
 
         data = {
-
-            "rev": [
-                rev["Revenue"][0],
-                rev["Revenue"][1],
-                rev["Revenue"][2]
-            ],
-
-            "ebitda": [
-                rev["EBITDA"][0],
-                rev["EBITDA"][1],
-                rev["EBITDA"][2]
-            ],
-
-            "profit": [
-                rev["Net Profit"][0],
-                rev["Net Profit"][1],
-                rev["Net Profit"][2]
-            ],
-
+            "rev": [rev["Revenue"][0], rev["Revenue"][1], rev["Revenue"][2]],
+            "ebitda": [rev["EBITDA"][0], rev["EBITDA"][1], rev["EBITDA"][2]],
+            "profit": [rev["Net Profit"][0], rev["Net Profit"][1], rev["Net Profit"][2]],
             "assets": bs["Total Assets"][0],
             "equity": bs["Equity"][0],
-
             "current_assets": bs["Current Assets"][0],
             "current_liabilities": bs["Current Liabilities"][0],
-
             "debt": bs["Total Debt"][0],
-
             "ocf": cf["Operating Cash Flow"][0],
             "capex": cf["CAPEX"][0]
         }
 
-        # Save permanently
-        save_financial_raw(
-            st.session_state["active_review"],
-            data
-        )
-
+        # Persist raw data (so reload keeps it)
+        save_financial_raw(st.session_state["active_review"], data)
         st.session_state["fin_excel"] = data
 
     except Exception as e:
@@ -279,69 +240,42 @@ st.divider()
 if st.button("📈 Analyze Financials"):
 
     data = {
-
         "rev": [rev_y2, rev_y1, rev_y],
         "ebitda": [ebitda_y2, ebitda_y1, ebitda_y],
         "profit": [profit_y2, profit_y1, profit_y],
-
         "assets": assets,
         "equity": equity,
-
         "current_assets": current_assets,
         "current_liabilities": current_liabilities,
-
         "debt": debt,
-
         "ocf": ocf,
         "capex": capex
     }
 
-    # Save raw permanently
-    save_financial_raw(
-        st.session_state["active_review"],
-        data
-    )
-
+    # Persist raw permanently (so reload keeps it)
+    save_financial_raw(st.session_state["active_review"], data)
     st.session_state["fin_excel"] = data
 
     results = analyze_financials(data)
-
     if not results:
         st.error("Financial analysis failed.")
         st.stop()
 
     # ==================================================
-    # KPI Mapping (ALIGN WITH data/kpi_definitions.json)
+    # KPI MAPPING — MUST MATCH data/kpi_definitions.json
     # ==================================================
-    # FIN_REV_GROWTH   -> Revenue Growth (YoY) in percent
-    # FIN_PROFIT_MARGIN -> Profit Margin (Net Profit / Revenue) in percent
-
-    rev_curr = float(rev_y) if rev_y else 0.0
-    rev_prev = float(rev_y1) if rev_y1 else 0.0
-    prof_curr = float(profit_y) if profit_y else 0.0
-
-    if rev_prev != 0:
-        fin_rev_growth = ((rev_curr - rev_prev) / rev_prev) * 100.0
-    else:
-        fin_rev_growth = 0.0
-
-    if rev_curr != 0:
-        fin_profit_margin = (prof_curr / rev_curr) * 100.0
-    else:
-        fin_profit_margin = 0.0
+    fin_rev_growth = pct((rev_y - rev_y1), rev_y1)           # YoY % (Y-1 -> Y)
+    fin_profit_margin = pct(profit_y, rev_y)                 # Profit / Revenue %
 
     kpi_payload = {
-        "FIN_REV_GROWTH": round(fin_rev_growth, 2),
-        "FIN_PROFIT_MARGIN": round(fin_profit_margin, 2)
+        "FIN_REV_GROWTH": fin_rev_growth,
+        "FIN_PROFIT_MARGIN": fin_profit_margin
     }
 
-    # Save KPIs
-    save_financial_kpis(
-        st.session_state["active_review"],
-        kpi_payload
-    )
+    # Save KPIs so Data Input page sees them
+    save_financial_kpis(st.session_state["active_review"], kpi_payload)
 
-    # Persist for display
+    # Keep for UI
     st.session_state["finance_results"] = kpi_payload
     st.session_state["finance_insights"] = generate_finance_insights(results)
     st.session_state["finance_alerts"] = generate_finance_alerts(results)
@@ -350,26 +284,31 @@ if st.button("📈 Analyze Financials"):
 
 
 # ==================================================
-# RESULTS
+# RESULTS (also load from DB if session empty)
 # ==================================================
+
+# If session doesn't have results (e.g., after reload), pull saved KPI values from DB
+if not st.session_state.get("finance_results"):
+    existing_kpis = get_kpi_inputs(st.session_state["active_review"])
+    restored = {}
+    for k in ("FIN_REV_GROWTH", "FIN_PROFIT_MARGIN"):
+        if k in existing_kpis:
+            try:
+                restored[k] = round(float(existing_kpis.get(k, 0.0)), 2)
+            except Exception:
+                restored[k] = 0.0
+    if restored:
+        st.session_state["finance_results"] = restored
 
 if st.session_state.get("finance_results"):
 
-    st.subheader("📌 Calculated Financial KPIs (Aligned with KPI Definitions)")
+    st.subheader("📌 Calculated Financial KPIs")
 
     kpis = st.session_state["finance_results"]
-
-    # Nice display + easy to copy manually
-    colA, colB = st.columns(2)
-    with colA:
-        st.metric("FIN_REV_GROWTH (Revenue Growth YoY %)", kpis.get("FIN_REV_GROWTH", 0.0))
-    with colB:
-        st.metric("FIN_PROFIT_MARGIN (Profit Margin %)", kpis.get("FIN_PROFIT_MARGIN", 0.0))
-
-    st.caption("These KPIs are saved to the database and should appear in the Data Input page for the same review.")
+    for k, v in kpis.items():
+        st.metric(k, v)
 
     # ---------------- Charts ----------------
-
     st.subheader("📊 Board Financial Charts")
 
     col1, col2 = st.columns(2)
@@ -394,21 +333,17 @@ if st.session_state.get("finance_results"):
         st.pyplot(plot_cashflow(ocf, capex))
 
     # ---------------- AI Advisor ----------------
-
     st.subheader("🤖 AI Financial Advisor")
-
     for msg in st.session_state.get("finance_insights", []):
         st.info(msg)
 
     # ---------------- Alerts ----------------
-
     st.subheader("🚨 Risk Alerts")
 
     if not st.session_state.get("finance_alerts"):
         st.success("No critical financial risks detected.")
 
     for level, msg in st.session_state.get("finance_alerts", []):
-
         if level == "CRITICAL":
             st.error(msg)
         elif level == "HIGH":
@@ -424,9 +359,4 @@ if st.session_state.get("finance_results"):
 st.divider()
 
 if st.button("➡️ Send to KPI Input"):
-
-    if not st.session_state.get("finance_results"):
-        st.error("Run financial analysis first.")
-        st.stop()
-
     st.switch_page("pages/3_Data_Input.py")

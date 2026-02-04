@@ -30,8 +30,6 @@ for item in allowed:
 
 if (page_name not in allowed_names) and (page_name not in allowed):
     # Don’t block if ROLE_PAGES format differs; just warn (keeps app usable)
-    # st.error("⛔ Access denied.")
-    # st.stop()
     pass
 
 
@@ -40,6 +38,11 @@ apply_talentiq_sidebar_style()
 render_sidebar()
 
 st.title("📝 KPI Data Input")
+
+# ---------------- Flash message ----------------
+if st.session_state.get("kpi_saved_flash"):
+    st.success("✅ KPI data saved.")
+    st.session_state["kpi_saved_flash"] = False
 
 # ---------------- Reviews ----------------
 reviews = get_reviews()
@@ -51,7 +54,7 @@ if not reviews:
 review_labels = [f"{r[1]} (#{r[0]})" for r in reviews]
 review_map = {label: r[0] for label, r in zip(review_labels, reviews)}
 
-# Persist selection across reruns (within a session)
+# Persist selection across reruns
 if "selected_review_label" not in st.session_state:
     active_review = st.session_state.get("active_review")
     if active_review:
@@ -84,11 +87,6 @@ existing = get_kpi_inputs(review_id)  # dict(kpi_id -> value)
 
 st.subheader("Enter KPI Values")
 
-# Flash message flag
-if st.session_state.get("kpi_saved_success"):
-    st.success("✅ KPI data saved.")
-    st.session_state["kpi_saved_success"] = False
-
 with st.form("kpi_form", clear_on_submit=False):
 
     inputs = {}
@@ -103,12 +101,8 @@ with st.form("kpi_form", clear_on_submit=False):
         except Exception:
             default = 0.0
 
-        # Unique widget key ensures stability across reruns/navigation
-        widget_key = f"kpi__{review_id}__{kpi_id}"
-        if widget_key not in st.session_state:
-            st.session_state[widget_key] = default
-
-        val = st.number_input(label, key=widget_key)
+        # Key makes widget stable across reruns
+        val = st.number_input(label, value=default, key=f"kpi_{review_id}_{kpi_id}")
         inputs[kpi_id] = val
 
     submitted = st.form_submit_button("Save KPI Data")
@@ -117,8 +111,8 @@ with st.form("kpi_form", clear_on_submit=False):
         for k, v in inputs.items():
             save_kpi_value(review_id, k, v)
 
-        # show success on next rerun too
-        st.session_state["kpi_saved_success"] = True
+        # Flash message after rerun
+        st.session_state["kpi_saved_flash"] = True
         st.rerun()
 
 render_footer()

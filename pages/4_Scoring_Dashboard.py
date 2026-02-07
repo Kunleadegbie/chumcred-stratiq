@@ -3,62 +3,56 @@ import math
 import streamlit as st
 import pandas as pd
 
-from core.kpi_registry import load_kpis
 from core.roles import ROLE_PAGES
-from core.scoring_engine import compute_scores
-from core.billing_engine import can_export, record_export
-from core.report_engine import export_board_report
+from db.repository import (
+    get_reviews,
+    get_kpi_inputs,
+    save_scores,
+    get_scores,
+    increment_exports,
+)
 
-from db.repository import get_reviews, get_kpi_inputs, save_scores, get_scores
+from core.scoring_engine import compute_scores
+from core.pdf_engine import export_report_to_pdf
 
 from components.styling import apply_talentiq_sidebar_style
 from components.sidebar import render_sidebar
 from components.footer import render_footer
 
 
-# ==========================================================
-# HELPERS
-# ==========================================================
+# ----------------------------------------------------------
+# SAFE IMPORTS (billing_engine may not have record_export)
+# ----------------------------------------------------------
+try:
+    from core.billing_engine import can_export, record_export  # type: ignore
+except Exception:
+    from core.billing_engine import can_export  # type: ignore
 
-def _to_float(x, default=0.0):
-    try:
-        if x is None:
-            return float(default)
-        v = float(x)
-        if math.isnan(v) or math.isinf(v):
-            return float(default)
-        return v
-    except Exception:
-        return float(default)
+    def record_export(*args, **kwargs):  # noqa: D401
+        """Fallback no-op if record_export does not exist."""
+        return None
 
 
-def _safe_basename(path: str) -> str:
-    try:
-        return os.path.basename(path)
-    except Exception:
-        return "report.pdf"
-
-
-# ==========================================================
+# ==================================================
 # AUTH GUARD
-# ==========================================================
-
+# ==================================================
 if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
-user = st.session_state["user"] or {}
-user_id = user.get("id")
-user_role = (user.get("role") or "").strip()
-
-# ==========================================================
-# ROLE GUARD (non-blocking)
-# ==========================================================
+user = st.session_state.get("user") or {}
+role = (user.get("role") or "").strip()
+role_lc = role.lower()
 
 page_name = "4_Scoring_Dashboard"
-allowed = ROLE_PAGES.get(user_role, [])
 
+
+# ==================================================
+# ROLE GUARD (ROBUST LIKE DATA INPUT PAGE)
+# ==================================================
+allowed = ROLE_PAGES.get(role, [])
 allowed_names = set()
+
 for item in allowed:
     if isinstance(item, str):
         allowed_names.add(item)
@@ -67,171 +61,219 @@ for item in allowed:
         allowed_names.add(str(item[1]))
 
 if (page_name not in allowed_names) and (page_name not in allowed):
-    # Keep app usable across ROLE_PAGES formats
-    pass
+    st.error("⛔ Access denied.")
+    st.stop()
 
 
-# ==========================================================
+# ==================================================
 # UI
-# ==========================================================
-
+# ==================================================
 apply_talentiq_sidebar_style()
 render_sidebar()
 
 st.title("📈 Scoring Dashboard")
 
-# ==========================================================
-# REVIEWS
-# ==========================================================
 
+# ==================================================
+# LOAD REVIEWS
+# ==================================================
 reviews = get_reviews()
 if not reviews:
-    st.warning("Create a review first.")
+    st.warning("No reviews found.")
     render_footer()
     st.stop()
 
-# Ensure active_review exists
-if "active_review" not in st.session_state or st.session_state.get("active_review") is None:
-    st.session_state["active_review"] = reviews[0][0]
+review_labels = [f"{r[1]} (#{r[0]})" for r in reviews]
+review_map = {label: r[0] for label, r in zip(review_labels, reviews)}
 
-review_id = int(st.session_state["active_review"])
-
-# ==========================================================
-# LOAD KPI DEFINITIONS + INPUTS
-# ==========================================================
-
-kpis = load_kpis()
-inputs = get_kpi_inputs(review_id) or {}  # dict(kpi_id -> value)
-
-# Ensure every KPI key exists (prevents missing -> NaN paths)
-for kpi_id in kpis.keys():
-    inputs.setdefault(kpi_id, 0.0)
-
-# Coerce inputs to floats
-inputs = {k: _to_float(v, 0.0) for k, v in inputs.items()}
-
-# ==========================================================
-# SCORE NOW
-# ==========================================================
-
-st.subheader("Run Scoring")
-
-colA, colB = st.columns([1, 2])
-
-with colA:
-    if st.button("🧮 Compute Scores", use_container_width=True):
-        try:
-            results, pillars, bhi = compute_scores(inputs, kpis)
-
-            # --- Sanitize NaNs before saving ---
-            clean_results = []
-            for r in (results or []):
-                clean_results.append({
-                    "kpi_id": str(r.get("kpi_id") or ""),
-                    "pillar": str(r.get("pillar") or ""),
-                    "value": _to_float(r.get("value"), 0.0),
-                    "score": _to_float(r.get("score"), 0.0),
-                })
-
-            clean_pillars = {}
-            for p, v in (pillars or {}).items():
-                clean_pillars[str(p)] = _to_float(v, 0.0)
-
-            bhi = _to_float(bhi, 0.0)
-
-            save_scores(review_id, clean_results, clean_pillars, bhi)
-            st.success("✅ Scores computed and saved.")
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"Failed to compute scores: {e}")
-
-with colB:
-    st.caption("Scoring uses KPI definitions (direction + scoring rules). Missing KPI values default to 0 to avoid NaN results.")
+selected = st.selectbox("Select Review", review_labels)
+review_id = review_map[selected]
+st.session_state["active_review"] = review_id
 
 
-# ==========================================================
-# DISPLAY SCORES (FROM DB)
-# ==========================================================
-
-saved_scores = get_scores(review_id) or []
-
-if not saved_scores:
-    st.info("No saved scores yet. Click **Compute Scores** to generate results.")
+# ==================================================
+# KPI INPUT CHECK
+# ==================================================
+inputs = get_kpi_inputs(review_id)  # expected dict(kpi_id -> value)
+if not inputs:
+    st.warning("No KPI data found. Please enter KPI values first.")
     render_footer()
     st.stop()
 
-df = pd.DataFrame(saved_scores, columns=["kpi_id", "pillar", "value", "score"])
 
-# Clean any legacy NaNs (from previous runs)
-df["value"] = df["value"].apply(lambda x: _to_float(x, 0.0))
-df["score"] = df["score"].apply(lambda x: _to_float(x, 0.0))
-df["pillar"] = df["pillar"].fillna("").astype(str)
-df["kpi_id"] = df["kpi_id"].fillna("").astype(str)
+# ==================================================
+# COMPUTE SCORES
+# ==================================================
+st.subheader("Scoring Engine")
 
-st.subheader("KPI Scores")
-st.dataframe(df, use_container_width=True, hide_index=True)
+if st.button("⚙️ Compute Scores"):
+    with st.spinner("Computing scores..."):
+        results, pillars, bhi = compute_scores(inputs)
 
-# Pillar averages
-pillar_df = df.groupby("pillar", as_index=False)["score"].mean()
-pillar_df["score"] = pillar_df["score"].apply(lambda x: _to_float(x, 0.0))
+        # Persist computed KPI-level scores
+        save_scores(review_id, results)
 
-st.subheader("Pillar Averages")
-st.dataframe(pillar_df.rename(columns={"score": "average_score"}), use_container_width=True, hide_index=True)
+        # Keep last computed values in session for display (optional)
+        st.session_state["last_pillars"] = pillars
+        st.session_state["last_bhi"] = bhi
 
-# Business Health Index (average of pillar averages)
-bhi = _to_float(pillar_df["score"].mean() if not pillar_df.empty else 0.0, 0.0)
-
-st.subheader("Business Health Index (BHI)")
-st.metric("BHI", round(bhi, 2))
+    st.success("✅ Scores computed successfully.")
+    st.rerun()
 
 
-# ==========================================================
-# BOARD REPORT EXPORT
-# ==========================================================
+# ==================================================
+# LOAD SCORES
+# ==================================================
+scores = get_scores(review_id)
+if not scores:
+    st.info("Click **Compute Scores** to generate results.")
+    render_footer()
+    st.stop()
 
-st.divider()
-st.subheader("Board Report Export")
 
-# Debug role (helps you verify Railway user_role)
-st.caption(f"DEBUG ROLE: {user_role or '(empty)'}")
+# ==================================================
+# NORMALIZE SCORE DATA (NO NaN)
+# ==================================================
+def _safe_float(x, default=0.0) -> float:
+    try:
+        v = float(x)
+        if math.isnan(v) or math.isinf(v):
+            return float(default)
+        return v
+    except Exception:
+        return float(default)
 
-is_admin = (user_role or "").strip().lower() in ("admin", "ceo")
 
-# can_export is optional gating (billing). We do NOT block Admin/CEO if billing is misconfigured.
-has_export = True
-try:
-    has_export = bool(can_export(user_id))
-except Exception:
-    has_export = True
+rows = []
+for item in scores:
+    # Dict format
+    if isinstance(item, dict):
+        kpi = item.get("kpi") or item.get("kpi_id") or item.get("id")
+        value = item.get("raw_value", item.get("value", 0))
+        score = item.get("score", 0)
+        pillar = item.get("pillar", "UNKNOWN")
 
-if not is_admin:
-    st.info("Only Admins and CEOs can export official reports.")
+    # Tuple/list format
+    elif isinstance(item, (list, tuple)) and len(item) >= 4:
+        kpi = item[0]
+        value = item[1]
+        score = item[2]
+        pillar = item[3]
+    else:
+        continue
+
+    score_f = _safe_float(score, 0.0)
+    value_f = _safe_float(value, 0.0)
+
+    rows.append([str(kpi), value_f, score_f, str(pillar or "UNKNOWN")])
+
+
+df = pd.DataFrame(rows, columns=["KPI", "Value", "Score", "Pillar"])
+
+# Ensure no NaN remains
+df["Score"] = df["Score"].fillna(0.0)
+df["Value"] = df["Value"].fillna(0.0)
+df["Pillar"] = df["Pillar"].fillna("UNKNOWN")
+
+
+# ==================================================
+# KPI TABLE
+# ==================================================
+st.subheader("📋 KPI Scores")
+st.dataframe(df, use_container_width=True)
+
+
+# ==================================================
+# PILLAR SUMMARY
+# ==================================================
+st.subheader("📊 Pillar Averages")
+
+if df.empty:
+    pillar_df = pd.DataFrame(columns=["Pillar", "Score"])
 else:
-    if not has_export:
-        st.warning("Export limit/billing check failed, but export is allowed for Admin/CEO to keep operations running.")
+    pillar_df = (
+        df.groupby("Pillar", dropna=False)["Score"]
+        .mean()
+        .reset_index()
+        .round(2)
+    )
 
-    if st.button("📄 Export Official Board Report"):
-        try:
-            file_path = export_board_report(review_id, official=True)
-            if not file_path:
-                st.error("Report generation failed.")
-            else:
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        "⬇️ Download Board Report",
-                        f,
-                        file_name=_safe_basename(file_path),
-                        mime="application/pdf",
-                    )
+pillar_df["Score"] = pillar_df["Score"].fillna(0.0)
+st.dataframe(pillar_df, use_container_width=True)
 
-                # record export (best-effort)
-                try:
-                    record_export(user_id)
-                except Exception:
-                    pass
 
-        except Exception as e:
-            st.error(f"Export failed: {e}")
+# ==================================================
+# BUSINESS HEALTH INDEX
+# ==================================================
+# Prefer engine BHI if present + valid; else compute from pillar average safely
+engine_bhi = st.session_state.get("last_bhi", None)
+engine_bhi = _safe_float(engine_bhi, default=float("nan"))
+
+if not math.isnan(engine_bhi):
+    bhi_value = round(engine_bhi, 2)
+else:
+    if len(pillar_df) == 0:
+        bhi_value = 0.0
+    else:
+        bhi_value = round(_safe_float(pillar_df["Score"].mean(), 0.0), 2)
+
+st.metric("Business Health Index (BHI)", bhi_value)
+
+
+# ==================================================
+# PDF EXPORT (ADMIN / CEO ONLY)
+# ==================================================
+st.divider()
+st.subheader("📄 Board Report Export")
+
+user_id = user.get("id")
+if user_id is None:
+    st.switch_page("pages/Login.py")
+    st.stop()
+
+is_admin_ceo = role_lc in ("admin", "ceo")
+
+# Debug line (keep if you want)
+st.write("DEBUG ROLE:", role)
+
+if not is_admin_ceo:
+    st.info("Only Admins and CEOs can export official reports.")
+    render_footer()
+    st.stop()
+
+has_export = bool(can_export(user_id))
+
+if not has_export:
+    st.warning("Export limit reached or export not enabled for this account.")
+    render_footer()
+    st.stop()
+
+brand_mode = st.radio("Report Branding", ["branded", "white_label"], horizontal=True)
+
+if st.button("📥 Generate PDF Report"):
+    with st.spinner("Generating report..."):
+        path = export_report_to_pdf(review_id, brand_mode=brand_mode)
+
+    # Track export usage (both patterns supported)
+    try:
+        record_export(user_id, review_id)
+    except Exception:
+        pass
+
+    try:
+        increment_exports(user_id)
+    except Exception:
+        pass
+
+    st.success("✅ Report generated successfully.")
+
+    filename = os.path.basename(path) if path else "board_report.pdf"
+    with open(path, "rb") as f:
+        st.download_button(
+            "⬇️ Download Report",
+            data=f,
+            file_name=filename,
+            mime="application/pdf",
+        )
 
 render_footer()

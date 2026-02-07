@@ -574,3 +574,115 @@ def save_financial_kpis(review_id, metrics: dict):
     """
     for kpi_id, value in (metrics or {}).items():
         save_kpi_value(review_id, kpi_id, float(value))
+
+
+# ==========================================================
+# FINANCIAL RAW (PERSISTENCE FOR RELOAD/NAVIGATION)
+# ==========================================================
+
+import json
+import sqlite3
+
+
+def _ensure_financial_raw_shape(conn: sqlite3.Connection) -> None:
+    """Ensure `financial_raw` exists and contains both legacy/new JSON columns.
+
+    Railway deployments often reuse an existing SQLite file whose table schema may
+    be older (e.g., a `financial_raw` table without the column your new code
+    selects). We avoid breakage by:
+      - creating the table if missing
+      - adding missing columns when possible
+      - never selecting a specific JSON column name in a way that can crash
+    """
+    cur = conn.cursor()
+
+    # Create the table if it's missing (includes both possible JSON columns)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS financial_raw (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER NOT NULL,
+            payload  TEXT,
+            data_json TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    # Add missing columns if the table pre-existed with an older shape
+    cur.execute("PRAGMA table_info(financial_raw)")
+    cols = [row[1] for row in cur.fetchall()]  # row[1] = column name
+
+    if "payload" not in cols:
+        cur.execute("ALTER TABLE financial_raw ADD COLUMN payload TEXT")
+    if "data_json" not in cols:
+        cur.execute("ALTER TABLE financial_raw ADD COLUMN data_json TEXT")
+
+    # updated_at is optional for older tables; we don't depend on it
+    conn.commit()
+
+
+def save_financial_raw(review_id: int, data: dict) -> None:
+    """Persist Financial Analyzer raw inputs for a review."""
+    conn = get_conn()
+    _ensure_financial_raw_shape(conn)
+    cur = conn.cursor()
+
+    payload = json.dumps(data or {}, ensure_ascii=False)
+
+    # Keep one latest row per review_id (simple upsert pattern)
+    cur.execute("DELETE FROM financial_raw WHERE review_id=?", (int(review_id),))
+    cur.execute(
+        "INSERT INTO financial_raw (review_id, payload, data_json) VALUES (?, ?, ?)",
+        (int(review_id), payload, payload),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def load_financial_raw(review_id: int):
+    """Load Financial Analyzer raw inputs for a review. Returns dict or None."""
+    conn = get_conn()
+    _ensure_financial_raw_shape(conn)
+    cur = conn.cursor()
+
+    # IMPORTANT: Select * (not a specific column) to avoid crashes on older schemas.
+    cur.execute(
+        """
+        SELECT *
+        FROM financial_raw
+        WHERE review_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (int(review_id),),
+    )
+
+    row = cur.fetchone()
+    desc = cur.description
+    conn.close()
+
+    if not row:
+        return None
+
+    # Convert row to dict safely (works for tuple rows and sqlite3.Row)
+    try:
+        if isinstance(row, sqlite3.Row):
+            rec = {k: row[k] for k in row.keys()}
+        else:
+            cols = [d[0] for d in (desc or [])]
+            rec = dict(zip(cols, row))
+    except Exception:
+        rec = {}
+
+    raw = rec.get("payload") or rec.get("data_json")
+    if not raw:
+        return None
+
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+

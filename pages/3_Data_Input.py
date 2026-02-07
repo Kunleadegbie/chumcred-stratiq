@@ -19,7 +19,6 @@ role = (st.session_state["user"].get("role") or "").strip()
 page_name = "3_Data_Input"
 
 allowed = ROLE_PAGES.get(role, [])
-# Support both formats: list[str] OR list[tuple(label,path)]
 allowed_names = set()
 for item in allowed:
     if isinstance(item, str):
@@ -28,8 +27,8 @@ for item in allowed:
         allowed_names.add(str(item[0]))
         allowed_names.add(str(item[1]))
 
+# Keep app usable even if ROLE_PAGES structure differs
 if (page_name not in allowed_names) and (page_name not in allowed):
-    # Don’t block if ROLE_PAGES format differs; just warn (keeps app usable)
     pass
 
 
@@ -39,10 +38,9 @@ render_sidebar()
 
 st.title("📝 KPI Data Input")
 
-# ---------------- Flash message ----------------
-if st.session_state.get("kpi_saved_flash"):
+# Flash success message (survives rerun)
+if st.session_state.pop("_kpi_flash_saved", False):
     st.success("✅ KPI data saved.")
-    st.session_state["kpi_saved_flash"] = False
 
 # ---------------- Reviews ----------------
 reviews = get_reviews()
@@ -78,8 +76,18 @@ selected = st.selectbox(
     key="selected_review_label"
 )
 
-review_id = review_map[selected]
+review_id = int(review_map[selected])
 st.session_state["active_review"] = review_id
+
+# If review changed, clear widget keys so inputs always reflect DB
+prev_review = st.session_state.get("_prev_review_id")
+if prev_review != review_id:
+    kpis_tmp = load_kpis()
+    for kpi_id in kpis_tmp.keys():
+        key = f"kpi_{prev_review}_{kpi_id}"
+        if key in st.session_state:
+            st.session_state.pop(key)
+    st.session_state["_prev_review_id"] = review_id
 
 # ---------------- KPI Inputs ----------------
 kpis = load_kpis()
@@ -101,8 +109,15 @@ with st.form("kpi_form", clear_on_submit=False):
         except Exception:
             default = 0.0
 
-        # Key makes widget stable across reruns
-        val = st.number_input(label, value=default, key=f"kpi_{review_id}_{kpi_id}")
+        # Stable widget key per review + kpi
+        widget_key = f"kpi_{review_id}_{kpi_id}"
+
+        val = st.number_input(
+            label,
+            value=default,
+            key=widget_key
+        )
+
         inputs[kpi_id] = val
 
     submitted = st.form_submit_button("Save KPI Data")
@@ -111,8 +126,8 @@ with st.form("kpi_form", clear_on_submit=False):
         for k, v in inputs.items():
             save_kpi_value(review_id, k, v)
 
-        # Flash message after rerun
-        st.session_state["kpi_saved_flash"] = True
+        # flash + rerun (message will show after rerun)
+        st.session_state["_kpi_flash_saved"] = True
         st.rerun()
 
 render_footer()

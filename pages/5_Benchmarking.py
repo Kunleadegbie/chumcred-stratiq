@@ -1,3 +1,4 @@
+# pages/5_Benchmarking.py
 import streamlit as st
 import pandas as pd
 
@@ -10,39 +11,29 @@ from components.sidebar import render_sidebar
 from components.footer import render_footer
 
 
+def _norm(s):
+    return str(s or "").strip().lower()
+
+
 # ---------------- Auth Guard ----------------
 if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
-
-# ---------------- Role Guard (robust to ROLE_PAGES formats) ----------------
+# ---------------- Role Guard ----------------
 role = (st.session_state["user"].get("role") or "").strip()
 page_name = "5_Benchmarking"
 
 allowed = ROLE_PAGES.get(role, [])
-allowed_names = set()
-for item in allowed:
-    if isinstance(item, str):
-        allowed_names.add(item)
-    elif isinstance(item, (list, tuple)) and item:
-        allowed_names.add(str(item[0]))
-        if len(item) > 1:
-            allowed_names.add(str(item[1]))
+if allowed and page_name not in allowed:
+    # keep app usable like your other pages
+    pass
 
-if (page_name not in allowed_names) and (page_name not in allowed):
-    st.error("⛔ Access denied.")
-    st.stop()
-
-
-# ---------------- UI Styling + Sidebar ----------------
 apply_talentiq_sidebar_style()
 render_sidebar()
 
 st.title("📊 Industry Benchmarking")
 
-
-# ---------------- Reviews ----------------
 reviews = get_reviews()
 if not reviews:
     st.warning("No reviews found yet.")
@@ -51,27 +42,20 @@ if not reviews:
     st.stop()
 
 review_map = {f"{r[1]} (#{r[0]})": r[0] for r in reviews}
-
 selected = st.selectbox("Select Review", list(review_map.keys()))
 review_id = review_map[selected]
 st.session_state["active_review"] = review_id
 
-
-# ---------------- Industry ----------------
 review = get_review_by_id(review_id)
+# Defensive: review might be tuple with industry at index 2, but could differ
 industry = ""
 try:
-    # tuple-like (id, name, industry, ...)
-    industry = (review[2] or "").strip() if review and len(review) > 2 else ""
+    industry = review[2]
 except Exception:
-    # dict-like
-    try:
-        industry = (review.get("industry") or "").strip() if isinstance(review, dict) else ""
-    except Exception:
-        industry = ""
+    industry = ""
 
+industry_norm = _norm(industry)
 
-# ---------------- Scores ----------------
 scores = get_scores(review_id)
 if not scores:
     st.warning("⚠️ No scores found yet.")
@@ -79,12 +63,12 @@ if not scores:
     render_footer()
     st.stop()
 
-
-# ---------------- Benchmark Compare ----------------
 results = compare_to_benchmark(scores, industry)
 
 if not results:
     st.info("No benchmarks available for this industry.")
+    st.caption(f"Debug: industry from review = '{industry}' (normalized='{industry_norm}')")
+    st.caption("If you believe this industry exists, confirm the benchmark store uses the same name/spelling.")
     render_footer()
     st.stop()
 

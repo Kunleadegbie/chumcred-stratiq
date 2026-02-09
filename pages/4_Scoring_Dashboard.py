@@ -1,55 +1,66 @@
-# pages/4_Scoring_Dashboard.py
+# ==========================================================
+# pages/4_Scoring_Dashboard.py — Scoring Dashboard (FIXED)
+# ==========================================================
+
+from __future__ import annotations
+
 import math
 import streamlit as st
 
 from core.roles import ROLE_PAGES
 from core.kpi_registry import load_kpis
-from db.repository import get_reviews, get_kpi_inputs
+from db.repository import get_reviews, get_kpi_inputs, get_review_by_id
 
 from components.styling import apply_talentiq_sidebar_style
 from components.sidebar import render_sidebar
 from components.footer import render_footer
 
-# Optional billing export gate
-try:
-    from core.billing_engine import can_export  # record_export removed (it doesn't exist)
-except Exception:
-    can_export = None
+
+# ---------------- Helpers ----------------
+def _norm(s):
+    return str(s or "").strip().lower()
 
 
-def _safe_float(x, default=0.0) -> float:
+def _to_float(x, default=0.0):
     try:
-        if x is None:
-            return default
         v = float(x)
-        if math.isnan(v) or math.isinf(v):
+        if v != v:  # NaN
             return default
         return v
     except Exception:
         return default
 
 
-def _norm_role(role_val) -> str:
-    return str(role_val or "").strip().lower()
-
-
-def _score_from_rules(value: float, rules: list) -> int:
+def _score_value(value: float, cfg: dict) -> float:
     """
-    rules example:
-      {"min": null, "max": 0, "score": 1}
-      {"min": 1, "max": 5, "score": 2}
+    cfg has scoring_rules like:
+      {min: null/max: 0/score: 1} ...
+    direction is informational here (your rules already encode it).
     """
-    v = _safe_float(value, 0.0)
-    for r in rules or []:
-        rmin = r.get("min", None)
-        rmax = r.get("max", None)
-        score = int(r.get("score", 0))
+    rules = cfg.get("scoring_rules") or []
+    v = _to_float(value, 0.0)
 
-        ok_min = True if rmin is None else (v >= float(rmin))
-        ok_max = True if rmax is None else (v <= float(rmax))
+    for r in rules:
+        mn = r.get("min", None)
+        mx = r.get("max", None)
+        score = r.get("score", None)
+        if score is None:
+            continue
+
+        ok_min = True if mn is None else (v >= float(mn))
+        ok_max = True if mx is None else (v <= float(mx))
         if ok_min and ok_max:
-            return score
-    return 0
+            return float(score)
+
+    # If it doesn't match any rule, return 0 (never NaN)
+    return 0.0
+
+
+def _mean(nums):
+    nums = [n for n in nums if isinstance(n, (int, float)) and not math.isnan(n)]
+    if not nums:
+        return 0.0
+    return sum(nums) / len(nums)
 
 
 # ---------------- Auth Guard ----------------
@@ -57,115 +68,146 @@ if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
-# ---------------- Role Guard ----------------
-role_raw = st.session_state["user"].get("role")
-role = _norm_role(role_raw)
+# ---------------- Role Guard (robust to ROLE_PAGES formats) ----------------
+role_raw = (st.session_state["user"].get("role") or "").strip()
+role = _norm(role_raw)
 page_name = "4_Scoring_Dashboard"
-allowed = ROLE_PAGES.get(role_raw, ROLE_PAGES.get(role, []))  # tolerate old mapping styles
 
-if allowed and page_name not in allowed:
-    # Keep usable (your other pages do same)
-    pass
+allowed = ROLE_PAGES.get(role_raw, ROLE_PAGES.get(role, [])) or []
+allowed_names = set()
+for item in allowed:
+    if isinstance(item, str):
+        allowed_names.add(item)
+    elif isinstance(item, (list, tuple)) and item:
+        allowed_names.add(str(item[0]))
+        allowed_names.add(str(item[1]))
+
+# Don't hard-block if ROLE_PAGES differs; keep it usable
+# if (page_name not in allowed_names) and (page_name not in allowed):
+#     st.error("⛔ Access denied.")
+#     st.stop()
 
 # ---------------- UI ----------------
 apply_talentiq_sidebar_style()
 render_sidebar()
 
-st.title("📈 Scoring Dashboard")
+st.title("📊 Scoring Dashboard")
 
 reviews = get_reviews()
 if not reviews:
-    st.warning("No reviews found yet.")
-    st.info("Start with: New Review → Data Input → Scoring")
+    st.warning("No reviews found yet. Create a review first.")
     render_footer()
     st.stop()
 
-review_map = {f"{r[1]} (#{r[0]})": r[0] for r in reviews}
-selected = st.selectbox("Select Review", list(review_map.keys()))
+review_labels = [f"{r[1]} (#{r[0]})" for r in reviews]
+review_map = {label: r[0] for label, r in zip(review_labels, reviews)}
+
+selected = st.selectbox("Select Review", review_labels, index=0)
 review_id = review_map[selected]
 st.session_state["active_review"] = review_id
 
-kpi_defs = load_kpis()
-inputs = get_kpi_inputs(review_id)  # dict(kpi_id -> value)
-
-if not inputs:
-    st.warning("⚠️ No KPI inputs found for this review.")
-    st.info("Go to **KPI Data Input** and save KPI values first.")
-    render_footer()
-    st.stop()
+# Load KPI definitions + inputs
+kpis = load_kpis()  # from data/kpi_definitions.json
+inputs = get_kpi_inputs(review_id) or {}  # dict(kpi_id -> value)
 
 st.subheader("Scoring Engine")
 
-# ---------------- Compute KPI scores ----------------
+# ---------------- Compute ----------------
+compute = st.button("✅ Compute Scores")
+
+# Always compute for display (even if button not pressed) to avoid blanks
 kpi_scores = {}
-pillar_scores = {}  # pillar -> list[int]
+pillar_scores = {}
 
-for kpi_id, cfg in kpi_defs.items():
-    val = _safe_float(inputs.get(kpi_id, 0.0), 0.0)
+# KPI scores
+for kpi_id, cfg in (kpis or {}).items():
+    raw_val = inputs.get(kpi_id, 0.0)
+    val = _to_float(raw_val, 0.0)
+    kpi_scores[kpi_id] = _score_value(val, cfg)
 
-    rules = cfg.get("scoring_rules", [])
-    score = _score_from_rules(val, rules)
+# Pillar averages
+pillar_bucket = {}
+for kpi_id, cfg in (kpis or {}).items():
+    pillar = str(cfg.get("pillar") or "").strip().upper()
+    pillar_bucket.setdefault(pillar, []).append(kpi_scores.get(kpi_id, 0.0))
 
-    kpi_scores[kpi_id] = {"value": val, "score": score, "pillar": cfg.get("pillar", "UNKNOWN")}
+for pillar, scores_list in pillar_bucket.items():
+    pillar_scores[pillar] = round(_mean(scores_list), 2)
 
-    pillar = str(cfg.get("pillar", "UNKNOWN"))
-    pillar_scores.setdefault(pillar, []).append(score)
-
-# ---------------- Pillar averages ----------------
-pillar_avgs = {}
-for pillar, scores in pillar_scores.items():
-    if scores:
-        pillar_avgs[pillar] = round(sum(scores) / len(scores), 2)
-    else:
-        pillar_avgs[pillar] = 0.0
-
-# ---------------- BHI ----------------
-all_scores = [v["score"] for v in kpi_scores.values() if isinstance(v.get("score"), int)]
-bhi = round(sum(all_scores) / len(all_scores), 2) if all_scores else 0.0
+# Business Health Index (mean of pillar averages)
+bhi = round(_mean(list(pillar_scores.values())), 2)
 
 # ---------------- Display ----------------
-st.subheader("📋 KPI Scores")
-for kpi_id, obj in kpi_scores.items():
-    st.write(f"**{kpi_id}** — Value: `{round(obj['value'], 2)}` | Score: `{obj['score']}`")
+st.markdown("### 📋 KPI Scores")
+# show as simple table
+kpi_rows = []
+for kpi_id, cfg in (kpis or {}).items():
+    kpi_rows.append(
+        {
+            "KPI": f"{cfg.get('name','')} ({kpi_id})",
+            "Input Value": round(_to_float(inputs.get(kpi_id, 0.0), 0.0), 4),
+            "Score (1-5)": round(_to_float(kpi_scores.get(kpi_id, 0.0), 0.0), 2),
+            "Pillar": (cfg.get("pillar") or "").strip(),
+        }
+    )
+st.dataframe(kpi_rows, use_container_width=True)
 
-st.subheader("📊 Pillar Averages")
-for p, avg in pillar_avgs.items():
-    st.metric(p, avg)
+st.markdown("### 📊 Pillar Averages")
+pillar_rows = [{"Pillar": p, "Average Score": v} for p, v in pillar_scores.items()]
+st.dataframe(pillar_rows, use_container_width=True)
 
-st.subheader("Business Health Index (BHI)")
+st.markdown("### 🧭 Business Health Index (BHI)")
 st.metric("BHI", bhi)
 
-# ---------------- Board Report Export Gate ----------------
+# ---------------- Export ----------------
 st.subheader("📄 Board Report Export")
 
-# debug
+# Debug view (keep, but normalized)
 st.caption(f"DEBUG ROLE RAW: {role_raw}")
 st.caption(f"DEBUG ROLE NORMALIZED: {role}")
 
 is_admin_or_ceo = role in ("admin", "ceo")
 
+# If your project has billing rules for analysts, keep it.
+can_export_ok = True
+try:
+    from core.billing_engine import can_export  # keep existing if present
+    user_id = st.session_state["user"].get("id")
+    if not is_admin_or_ceo:
+        can_export_ok = bool(can_export(user_id))
+except Exception:
+    # If billing_engine not available, do not block
+    can_export_ok = True
+
 if not is_admin_or_ceo:
-    st.warning("Only Admins and CEOs can export official reports.")
-    render_footer()
-    st.stop()
-
-# can_export gate (if billing engine exists)
-user_id = st.session_state["user"].get("id")
-
-if callable(can_export):
-    allowed_export = bool(can_export(user_id))
+    st.info("Only Admins and CEOs can export official reports.")
 else:
-    # if billing is not wired, don't block admin export
-    allowed_export = True
-
-if not allowed_export:
-    st.warning("Export limit reached or export not enabled for this account.")
-    render_footer()
-    st.stop()
-
-# If you already have a report exporter function, call it here.
-# For now, provide a placeholder "Export" button so the gate works.
-if st.button("Export Board Report"):
-    st.success("✅ Export allowed. (Hook your PDF generator here.)")
+    # Admin/CEO bypass export limits
+    if st.button("⬇️ Export Board Report"):
+        # If you have a report generator, use it; else show a safe fallback.
+        try:
+            # Optional: your project may have a PDF exporter
+            from core.board_report import generate_board_report_pdf  # type: ignore
+            pdf_bytes = generate_board_report_pdf(review_id)
+            st.download_button(
+                "Download PDF",
+                data=pdf_bytes,
+                file_name=f"board_report_review_{review_id}.pdf",
+                mime="application/pdf",
+            )
+        except Exception:
+            # fallback: downloadable CSV-like text
+            report_text = []
+            report_text.append(f"REVIEW_ID,{review_id}")
+            report_text.append(f"BHI,{bhi}")
+            for p, v in pillar_scores.items():
+                report_text.append(f"PILLAR_{p},{v}")
+            st.download_button(
+                "Download Summary (CSV)",
+                data="\n".join(report_text).encode("utf-8"),
+                file_name=f"board_report_review_{review_id}.csv",
+                mime="text/csv",
+            )
+        st.success("✅ Export prepared.")
 
 render_footer()

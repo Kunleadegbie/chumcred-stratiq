@@ -9,16 +9,12 @@ from core.financial_engine import analyze_financials
 from core.excel_parser import parse_financial_excel
 from core.finance_advisor import generate_finance_insights
 from core.finance_alerts import generate_finance_alerts
-from db.repository import save_financial_ai_report
-from core.pdf_engine import save_financial_ai_report
-
 
 from db.repository import (
-    get_reviews,
-    get_kpi_inputs,
     save_financial_kpis,
     save_financial_raw,
-    load_financial_raw
+    load_financial_raw,
+    save_ai_report
 )
 
 from components.sidebar import render_sidebar
@@ -44,19 +40,10 @@ if "user" not in st.session_state:
     st.switch_page("pages/Login.py")
     st.stop()
 
-# ==================================================
-# REVIEWS / ACTIVE REVIEW (REQUIRED FOR PERSISTENCE)
-# ==================================================
-
-reviews = get_reviews()
-if not reviews:
+if "active_review" not in st.session_state:
     st.warning("Create a review first.")
     st.switch_page("pages/2_New_Review.py")
     st.stop()
-
-# If active_review not set, pick first review
-if "active_review" not in st.session_state or not st.session_state.get("active_review"):
-    st.session_state["active_review"] = int(reviews[0][0])
 
 
 # ==================================================
@@ -64,22 +51,16 @@ if "active_review" not in st.session_state or not st.session_state.get("active_r
 # ==================================================
 
 if "fin_excel" not in st.session_state:
+
     saved = load_financial_raw(st.session_state["active_review"])
+
     if saved:
         st.session_state["fin_excel"] = saved
     else:
         st.session_state["fin_excel"] = {}
 
-# Load any already-saved KPI values so KPIs show after reload
 if "finance_results" not in st.session_state:
-    existing_kpis = get_kpi_inputs(st.session_state["active_review"]) or {}
-    st.session_state["finance_results"] = {
-        "FIN_REV_GROWTH": float(existing_kpis.get("FIN_REV_GROWTH", 0.0) or 0.0),
-        "FIN_PROFIT_MARGIN": float(existing_kpis.get("FIN_PROFIT_MARGIN", 0.0) or 0.0),
-        "CUST_CHURN": float(existing_kpis.get("CUST_CHURN", 0.0) or 0.0),
-        "OPS_COST_RATIO": float(existing_kpis.get("OPS_COST_RATIO", 0.0) or 0.0),
-        "PEOPLE_ATTRITION": float(existing_kpis.get("PEOPLE_ATTRITION", 0.0) or 0.0),
-    }
+    st.session_state["finance_results"] = None
 
 if "finance_insights" not in st.session_state:
     st.session_state["finance_insights"] = []
@@ -117,10 +98,13 @@ TEMPLATE_PATH = os.path.join(
 # ==================================================
 
 def get_val(key, idx=None, default=0.0):
+
     data = st.session_state.get("fin_excel", {})
+
     try:
         if idx is None:
             return float(data.get(key, default))
+
         return float(data.get(key, [default])[idx])
     except Exception:
         return float(default)
@@ -133,13 +117,16 @@ def get_val(key, idx=None, default=0.0):
 st.subheader("📥 Excel Template")
 
 if os.path.exists(TEMPLATE_PATH):
+
     with open(TEMPLATE_PATH, "rb") as f:
+
         st.download_button(
             "Download Financial Template",
             f,
             file_name="financial_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
 else:
     st.error("Financial template not found. Contact Admin.")
 
@@ -156,7 +143,9 @@ uploaded = st.file_uploader(
 )
 
 if uploaded:
+
     try:
+
         parsed = parse_financial_excel(uploaded)
         st.success("Template validated successfully.")
 
@@ -165,9 +154,24 @@ if uploaded:
         cf = parsed["Cash_Flow"]
 
         data = {
-            "rev": [rev["Revenue"][0], rev["Revenue"][1], rev["Revenue"][2]],
-            "ebitda": [rev["EBITDA"][0], rev["EBITDA"][1], rev["EBITDA"][2]],
-            "profit": [rev["Net Profit"][0], rev["Net Profit"][1], rev["Net Profit"][2]],
+
+            "rev": [
+                rev["Revenue"][0],
+                rev["Revenue"][1],
+                rev["Revenue"][2]
+            ],
+
+            "ebitda": [
+                rev["EBITDA"][0],
+                rev["EBITDA"][1],
+                rev["EBITDA"][2]
+            ],
+
+            "profit": [
+                rev["Net Profit"][0],
+                rev["Net Profit"][1],
+                rev["Net Profit"][2]
+            ],
 
             "assets": bs["Total Assets"][0],
             "equity": bs["Equity"][0],
@@ -180,13 +184,18 @@ if uploaded:
             "ocf": cf["Operating Cash Flow"][0],
             "capex": cf["CAPEX"][0],
 
-            # Optional (not in Excel template) — keep previous values if any
-            "churn": float(st.session_state.get("fin_excel", {}).get("churn", 0.0) or 0.0),
-            "attrition": float(st.session_state.get("fin_excel", {}).get("attrition", 0.0) or 0.0),
+            # manual KPI placeholders saved for reload (if user sets them later)
+            "cust_churn": float(st.session_state.get("fin_excel", {}).get("cust_churn", 0.0) or 0.0),
+            "ops_cost_ratio": float(st.session_state.get("fin_excel", {}).get("ops_cost_ratio", 0.0) or 0.0),
+            "people_attrition": float(st.session_state.get("fin_excel", {}).get("people_attrition", 0.0) or 0.0),
         }
 
-        # Save permanently
-        save_financial_raw(st.session_state["active_review"], data)
+        # Save permanently for reload/navigation
+        save_financial_raw(
+            st.session_state["active_review"],
+            data
+        )
+
         st.session_state["fin_excel"] = data
 
     except Exception as e:
@@ -253,41 +262,33 @@ with cf2:
 
 
 # ==================================================
-# OTHER KPI INPUTS (MANUAL / DERIVED)
+# OTHER KPI INPUTS (MANUAL)
 # ==================================================
 
-st.subheader("Other KPI Inputs")
+st.subheader("Other KPI Inputs (Manual)")
 
-k1, k2 = st.columns(2)
+m1, m2, m3 = st.columns(3)
 
-with k1:
-    churn = st.number_input(
+with m1:
+    cust_churn = st.number_input(
         "Customer Churn Rate (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=float(get_val("churn")),
-        step=0.1
+        0.0,
+        value=float(st.session_state.get("fin_excel", {}).get("cust_churn", 0.0) or 0.0)
     )
 
-with k2:
-    attrition = st.number_input(
+with m2:
+    ops_cost_ratio = st.number_input(
+        "Operating Cost Ratio (%)",
+        0.0,
+        value=float(st.session_state.get("fin_excel", {}).get("ops_cost_ratio", 0.0) or 0.0)
+    )
+
+with m3:
+    people_attrition = st.number_input(
         "Employee Attrition Rate (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=float(get_val("attrition")),
-        step=0.1
+        0.0,
+        value=float(st.session_state.get("fin_excel", {}).get("people_attrition", 0.0) or 0.0)
     )
-
-# Derived metric preview (uses latest year Y)
-ops_cost_ratio_preview = 0.0
-try:
-    if float(rev_y) != 0:
-        ops_cost_ratio_preview = ((float(rev_y) - float(ebitda_y)) / float(rev_y)) * 100.0
-except Exception:
-    ops_cost_ratio_preview = 0.0
-
-st.caption("Operating Cost Ratio is derived from Revenue and EBITDA (approx. Operating Costs / Revenue).")
-st.metric("Operating Cost Ratio (Derived, %)", round(ops_cost_ratio_preview, 2))
 
 
 # ==================================================
@@ -296,9 +297,20 @@ st.metric("Operating Cost Ratio (Derived, %)", round(ops_cost_ratio_preview, 2))
 
 st.divider()
 
+def _safe_pct(numer: float, denom: float) -> float:
+    try:
+        denom = float(denom)
+        if denom == 0:
+            return 0.0
+        return (float(numer) / denom) * 100.0
+    except Exception:
+        return 0.0
+
+
 if st.button("📈 Analyze Financials"):
 
     data = {
+
         "rev": [rev_y2, rev_y1, rev_y],
         "ebitda": [ebitda_y2, ebitda_y1, ebitda_y],
         "profit": [profit_y2, profit_y1, profit_y],
@@ -314,72 +326,65 @@ if st.button("📈 Analyze Financials"):
         "ocf": ocf,
         "capex": capex,
 
-        # Optional manual inputs
-        "churn": churn,
-        "attrition": attrition,
+        # manual KPIs saved too
+        "cust_churn": cust_churn,
+        "ops_cost_ratio": ops_cost_ratio,
+        "people_attrition": people_attrition
     }
 
-    # Save raw permanently (for reload/navigation persistence)
-    save_financial_raw(st.session_state["active_review"], data)
+    # Save raw permanently (reload persistence)
+    save_financial_raw(
+        st.session_state["active_review"],
+        data
+    )
     st.session_state["fin_excel"] = data
 
     results = analyze_financials(data)
+
     if not results:
         st.error("Financial analysis failed.")
         st.stop()
 
-    # Required KPI computations (aligned with data/kpi_definitions.json)
-    rev_growth = 0.0
-    try:
-        if float(rev_y1) != 0:
-            rev_growth = ((float(rev_y) - float(rev_y1)) / float(rev_y1)) * 100.0
-    except Exception:
-        rev_growth = 0.0
+    # ==================================================
+    # KPI Mapping (MATCHES kpi_definitions.json)
+    # ==================================================
+    # FIN_REV_GROWTH: Revenue Growth (YoY) using last 2 years (Y vs Y-1)
+    rev_growth_yoy = _safe_pct((rev_y - rev_y1), rev_y1)
 
-    profit_margin = 0.0
-    try:
-        if float(rev_y) != 0:
-            profit_margin = (float(profit_y) / float(rev_y)) * 100.0
-    except Exception:
-        profit_margin = 0.0
-
-    ops_cost_ratio = 0.0
-    try:
-        if float(rev_y) != 0:
-            ops_cost_ratio = ((float(rev_y) - float(ebitda_y)) / float(rev_y)) * 100.0
-    except Exception:
-        ops_cost_ratio = 0.0
+    # FIN_PROFIT_MARGIN: Profit Margin (%) on latest year
+    profit_margin = _safe_pct(profit_y, rev_y)
 
     kpi_payload = {
-        "FIN_REV_GROWTH": round(rev_growth, 2),
+        "FIN_REV_GROWTH": round(rev_growth_yoy, 2),
         "FIN_PROFIT_MARGIN": round(profit_margin, 2),
-        "CUST_CHURN": round(float(churn or 0.0), 2),
-        "OPS_COST_RATIO": round(ops_cost_ratio, 2),
-        "PEOPLE_ATTRITION": round(float(attrition or 0.0), 2),
+        "CUST_CHURN": round(float(cust_churn or 0.0), 2),
+        "OPS_COST_RATIO": round(float(ops_cost_ratio or 0.0), 2),
+        "PEOPLE_ATTRITION": round(float(people_attrition or 0.0), 2),
     }
 
-    # Save KPIs into kpi_inputs so Data Input page shows them
-    save_financial_kpis(st.session_state["active_review"], kpi_payload)
-
-    st.session_state["finance_results"] = kpi_payload
-    st.session_state["finance_insights"] = generate_finance_insights(results)
-    st.session_state["finance_alerts"] = generate_finance_alerts(results)
-
-    st.success("✅ All 5 KPIs calculated and saved (Financial + Customer + Operations + People)")
-
-
-    # Persist AI narrative for Board Report PDF
-    ai_lines = []
-    ai_lines.extend(st.session_state.get("finance_insights", []))
-
-    alerts = st.session_state.get("finance_alerts", [])
-    for lvl, msg in alerts:
-        ai_lines.append(f"{lvl}: {msg}")
-
-    save_financial_ai_report(
+    # Save KPIs to DB (so Data Input shows them)
+    save_financial_kpis(
         st.session_state["active_review"],
-        "\n".join([x for x in ai_lines if x])
+        kpi_payload
     )
+
+    # Save AI Insights/Alerts to DB for Board Report PDF
+    insights = generate_finance_insights(results) or []
+    alerts = generate_finance_alerts(results) or []
+
+    save_ai_report(
+        st.session_state["active_review"],
+        "financial_analyzer",
+        {"insights": insights, "alerts": alerts}
+    )
+
+    # Save for UI
+    st.session_state["finance_results"] = kpi_payload
+    st.session_state["finance_insights"] = insights
+    st.session_state["finance_alerts"] = alerts
+
+    st.success("✅ Financial KPIs calculated and saved")
+
 
 # ==================================================
 # RESULTS
@@ -410,26 +415,23 @@ if st.session_state.get("finance_results"):
         st.pyplot(plot_debt_ratio(debt, assets))
 
     col3, col4 = st.columns(2)
-
     with col3:
         st.pyplot(plot_current_ratio(current_assets, current_liabilities))
-
     with col4:
         st.pyplot(plot_cashflow(ocf, capex))
 
     # ---------------- AI Advisor ----------------
     st.subheader("🤖 AI Financial Advisor")
-    for msg in st.session_state.get("finance_insights", []):
+    for msg in (st.session_state.get("finance_insights") or []):
         st.info(msg)
 
     # ---------------- Alerts ----------------
     st.subheader("🚨 Risk Alerts")
 
-    alerts = st.session_state.get("finance_alerts", [])
-    if not alerts:
+    if not st.session_state.get("finance_alerts"):
         st.success("No critical financial risks detected.")
 
-    for level, msg in alerts:
+    for level, msg in (st.session_state.get("finance_alerts") or []):
         if level == "CRITICAL":
             st.error(msg)
         elif level == "HIGH":
@@ -445,5 +447,9 @@ if st.session_state.get("finance_results"):
 st.divider()
 
 if st.button("➡️ Send to KPI Input"):
-    # KPIs already saved; just navigate
+
+    if not st.session_state.get("finance_results"):
+        st.error("Run financial analysis first.")
+        st.stop()
+
     st.switch_page("pages/3_Data_Input.py")

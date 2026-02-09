@@ -1,86 +1,67 @@
-import sqlite3
+# db/repository.py
 import os
 import json
-from datetime import datetime
+import sqlite3
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ==========================================================
 # PATHS
 # ==========================================================
 
-# Project root (…/db/repository.py -> …/)
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Prefer Railway volume if available
-DEFAULT_DB_PATH = os.path.join(BASE_DIR, "stratiq.db")
-VOLUME_DB_PATH = "/data/stratiq.db"
-
-DB_PATH = os.environ.get("STRATIQ_DB_PATH") or (VOLUME_DB_PATH if os.path.exists("/data") else DEFAULT_DB_PATH)
-
-# Try multiple schema locations (Railway paths differ depending on deploy layout)
-SCHEMA_CANDIDATES = [
-    os.environ.get("STRATIQ_SCHEMA_PATH", "").strip(),
-    os.path.join(BASE_DIR, "db", "schema.sql"),
-    os.path.join(os.path.dirname(__file__), "schema.sql"),
-    "/app/db/schema.sql",
-    "/data/db/schema.sql",
-]
-SCHEMA_CANDIDATES = [p for p in SCHEMA_CANDIDATES if p]
+DB_PATH = os.environ.get("DB_PATH") or os.path.join(BASE_DIR, "data", "db", "app.db")
+SCHEMA_PATH = os.path.join(BASE_DIR, "data", "db", "schema.sql")
 
 
 # ==========================================================
-# INTERNAL HELPERS
+# CONNECTION
 # ==========================================================
 
-def _table_exists(conn, table_name: str) -> bool:
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (table_name,)
-    )
-    return cur.fetchone() is not None
+def get_connection() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+
+    _bootstrap_schema_if_needed(conn)
+    _ensure_tables_for_runtime(conn)
+
+    return conn
 
 
-def _column_exists(conn, table_name: str, column_name: str) -> bool:
-    cur = conn.cursor()
+# Backward compatibility (some pages/scripts use get_conn)
+def get_conn() -> sqlite3.Connection:
+    return get_connection()
+
+
+def _bootstrap_schema_if_needed(conn: sqlite3.Connection) -> None:
+    """
+    If schema.sql exists, execute it once (idempotent).
+    We do not fail deployment if schema.sql is missing.
+    """
     try:
-        cur.execute(f"PRAGMA table_info({table_name})")
-        cols = [r[1] for r in cur.fetchall()]  # r[1] = name
-        return column_name in cols
+        if os.path.exists(SCHEMA_PATH):
+            with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+                sql = f.read().strip()
+            if sql:
+                conn.executescript(sql)
+                conn.commit()
     except Exception:
-        return False
+        # Keep app alive even if schema.sql differs across environments
+        pass
 
 
-def _apply_schema_if_available(conn):
-    schema_path = None
-    for p in SCHEMA_CANDIDATES:
-        if p and os.path.exists(p):
-            schema_path = p
-            break
-
-    # If schema exists, use it (your original behavior)
-    if schema_path:
-        with open(schema_path, "r", encoding="utf-8") as f:
-            conn.executescript(f.read())
-            conn.commit()
-        return True
-
-    # If schema file not found, create minimal required tables safely
+def _ensure_tables_for_runtime(conn: sqlite3.Connection) -> None:
+    """
+    Ensure the minimal tables/columns used by:
+    - Data Input
+    - Financial Analyzer (reload persistence + KPIs + AI report)
+    - Scoring Dashboard (scores + exports)
+    """
     cur = conn.cursor()
 
-    # users
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE,
-            full_name TEXT,
-            password_hash TEXT,
-            role TEXT DEFAULT 'Pending',
-            is_active INTEGER DEFAULT 0
-        )
-    """)
-
-    # reviews
+    # Reviews table (expected shape: id, company_name, industry, created_at)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -90,457 +71,201 @@ def _apply_schema_if_available(conn):
         )
     """)
 
-    # kpi_inputs
+    # KPI inputs table (expected by Data Input)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS kpi_inputs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            review_id INTEGER,
-            kpi_id TEXT,
-            value REAL,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            review_id INTEGER NOT NULL,
+            kpi_id TEXT NOT NULL,
+            value REAL DEFAULT 0.0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # scores
+    # Scores table (for Scoring Dashboard / Benchmarking)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS scores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER NOT NULL,
+            bhi REAL DEFAULT 0.0,
+            pillar_json TEXT,
+            kpi_json TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Exports table (track export counts)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS exports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
             review_id INTEGER,
-            kpi_id TEXT,
-            raw_value REAL,
-            score REAL,
-            pillar TEXT,
+            export_type TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # subscriptions (if your app uses it)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            plan TEXT,
-            start_date TEXT,
-            end_date TEXT,
-            max_reviews INTEGER,
-            max_exports INTEGER,
-            used_reviews INTEGER DEFAULT 0,
-            used_exports INTEGER DEFAULT 0,
-            is_active INTEGER DEFAULT 1
-        )
-    """)
-
-    # financial_raw (for Financial Analyzer persistence)
+    # Financial raw persistence table
+    # IMPORTANT: We support BOTH old column names (data_json) and new (payload)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS financial_raw (
-            review_id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER NOT NULL,
+            payload TEXT,
             data_json TEXT,
-            updated_at TEXT
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    _ensure_column(conn, "financial_raw", "payload", "TEXT")
+    _ensure_column(conn, "financial_raw", "data_json", "TEXT")
+
+    # AI Reports (store Financial Analyzer AI Advisor + Alerts)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ai_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER NOT NULL,
+            report_type TEXT NOT NULL,
+            payload TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    _ensure_column(conn, "ai_reports", "payload", "TEXT")
 
     conn.commit()
-    return False
 
 
-def _ensure_financial_raw_shape(conn):
-    # Ensure table exists
-    if not _table_exists(conn, "financial_raw"):
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS financial_raw (
-                review_id INTEGER PRIMARY KEY,
-                data_json TEXT,
-                updated_at TEXT
-            )
-        """)
-        conn.commit()
-
-    # Ensure data_json column exists (older deployments may differ)
-    if not _column_exists(conn, "financial_raw", "data_json"):
+def _ensure_column(conn: sqlite3.Connection, table: str, col: str, col_type: str) -> None:
+    cur = conn.cursor()
+    cur.execute(f"PRAGMA table_info({table})")
+    cols = [r[1] for r in cur.fetchall()]
+    if col not in cols:
         try:
-            conn.execute("ALTER TABLE financial_raw ADD COLUMN data_json TEXT")
-            conn.commit()
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
         except Exception:
             pass
-
-    if not _column_exists(conn, "financial_raw", "updated_at"):
-        try:
-            conn.execute("ALTER TABLE financial_raw ADD COLUMN updated_at TEXT")
-            conn.commit()
-        except Exception:
-            pass
-
-
-# ==========================================================
-# CONNECTION + AUTO INIT
-# ==========================================================
-
-def get_connection():
-    # Ensure parent folder exists (for custom DB path)
-    parent = os.path.dirname(DB_PATH)
-    if parent and parent != "/" and not os.path.exists(parent):
-        try:
-            os.makedirs(parent, exist_ok=True)
-        except Exception:
-            pass
-
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-
-    # If users table missing, initialize schema safely
-    if not _table_exists(conn, "users"):
-        _apply_schema_if_available(conn)
-
-    # Always ensure these exist (prevents Railway “blank after restart” issues)
-    _apply_schema_if_available(conn) if not _table_exists(conn, "reviews") else None
-    _ensure_financial_raw_shape(conn)
-
-    return conn
-
-
-# Alias (for backward compatibility)
-def get_conn():
-    return get_connection()
 
 
 # ==========================================================
 # REVIEWS
 # ==========================================================
 
-def create_review(company_name, industry):
-    conn = get_conn()
+def get_reviews() -> List[Tuple[int, str, str]]:
+    conn = get_connection()
     cur = conn.cursor()
-
-    cur.execute(
-        "INSERT INTO reviews (company_name, industry) VALUES (?, ?)",
-        (company_name, industry)
-    )
-
-    conn.commit()
-    rid = cur.lastrowid
+    cur.execute("SELECT id, company_name, industry FROM reviews ORDER BY id DESC")
+    rows = cur.fetchall()
     conn.close()
+    return [(int(r["id"]), r["company_name"] or "", r["industry"] or "") for r in rows]
 
-    return rid
 
-
-def get_reviews():
-    conn = get_conn()
-
-    rows = conn.execute("""
-        SELECT id, company_name, industry, created_at
-        FROM reviews
-        ORDER BY id DESC
-    """).fetchall()
-
+def get_review_by_id(review_id: int) -> Optional[Tuple[int, str, str]]:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, company_name, industry FROM reviews WHERE id=?", (int(review_id),))
+    r = cur.fetchone()
     conn.close()
-    return rows
-
-
-def get_review_by_id(review_id):
-    conn = get_conn()
-
-    row = conn.execute("""
-        SELECT id, company_name, industry, created_at
-        FROM reviews
-        WHERE id=?
-    """, (review_id,)).fetchone()
-
-    conn.close()
-    return row
+    if not r:
+        return None
+    return (int(r["id"]), r["company_name"] or "", r["industry"] or "")
 
 
 # ==========================================================
 # KPI INPUTS
 # ==========================================================
 
-def save_kpi_value(review_id, kpi_id, value):
-    conn = get_conn()
+def get_kpi_inputs(review_id: int) -> Dict[str, float]:
+    conn = get_connection()
     cur = conn.cursor()
+    cur.execute("""
+        SELECT kpi_id, value
+        FROM kpi_inputs
+        WHERE review_id=?
+    """, (int(review_id),))
+    rows = cur.fetchall()
+    conn.close()
 
+    out: Dict[str, float] = {}
+    for r in rows:
+        try:
+            out[str(r["kpi_id"])] = float(r["value"])
+        except Exception:
+            out[str(r["kpi_id"])] = 0.0
+    return out
+
+
+def save_kpi_value(review_id: int, kpi_id: str, value: float) -> None:
+    conn = get_connection()
+    cur = conn.cursor()
     cur.execute("""
         DELETE FROM kpi_inputs
         WHERE review_id=? AND kpi_id=?
-    """, (review_id, kpi_id))
+    """, (int(review_id), str(kpi_id)))
 
     cur.execute("""
         INSERT INTO kpi_inputs (review_id, kpi_id, value)
         VALUES (?, ?, ?)
-    """, (review_id, kpi_id, float(value)))
+    """, (int(review_id), str(kpi_id), float(value) if value is not None else 0.0))
 
     conn.commit()
     conn.close()
 
 
-def get_kpi_inputs(review_id):
-    conn = get_conn()
-
-    rows = conn.execute("""
-        SELECT kpi_id, value
-        FROM kpi_inputs
-        WHERE review_id=?
-    """, (review_id,)).fetchall()
-
-    conn.close()
-
-    # sqlite Row -> dict
-    out = {}
-    for r in rows:
-        out[str(r["kpi_id"])] = r["value"]
-    return out
-
-
-# ==========================================================
-# SCORES
-# ==========================================================
-
-def save_scores(review_id, results):
-    conn = get_conn()
+def save_financial_kpis(review_id: int, metrics: Dict[str, Any]) -> None:
+    """
+    Financial Analyzer writes KPIs into the SAME table used by Data Input (kpi_inputs),
+    so the Data Input page can display them immediately.
+    """
+    metrics = metrics or {}
+    conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM scores WHERE review_id=?", (review_id,))
-
-    for r in results:
+    for kpi_id, value in metrics.items():
         cur.execute("""
-            INSERT INTO scores
-            (review_id, kpi_id, raw_value, score, pillar)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            review_id,
-            r["kpi_id"],
-            r["value"],
-            r["score"],
-            r["pillar"]
-        ))
+            DELETE FROM kpi_inputs
+            WHERE review_id=? AND kpi_id=?
+        """, (int(review_id), str(kpi_id)))
 
-    conn.commit()
-    conn.close()
-
-
-def get_scores(review_id):
-    conn = get_conn()
-
-    rows = conn.execute("""
-        SELECT kpi_id, raw_value, score, pillar
-        FROM scores
-        WHERE review_id=?
-    """, (review_id,)).fetchall()
-
-    conn.close()
-    return rows
-
-
-# ==========================================================
-# USERS
-# ==========================================================
-
-def create_user(email, name, password_hash, role="Pending", is_active=0):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO users (
-            email,
-            full_name,
-            password_hash,
-            role,
-            is_active
-        )
-        VALUES (?, ?, ?, ?, ?)
-    """, (
-        email,
-        name,
-        password_hash,
-        role,
-        is_active
-    ))
-
-    conn.commit()
-    conn.close()
-
-
-def get_user_by_email(email):
-    conn = get_conn()
-
-    row = conn.execute("""
-        SELECT id, email, full_name, password_hash, role, is_active
-        FROM users
-        WHERE email=?
-    """, (email,)).fetchone()
-
-    conn.close()
-    return row
-
-
-def get_all_users():
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT id, email, full_name, role, is_active
-        FROM users
-        ORDER BY id
-    """)
-
-    rows = cur.fetchall()
-    conn.close()
-
-    users = []
-    for r in rows:
-        users.append({
-            "id": r["id"],
-            "email": r["email"],
-            "full_name": r["full_name"],
-            "role": r["role"],
-            "is_active": r["is_active"]
-        })
-    return users
-
-
-def update_user_role(user_id, role):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE users
-        SET role=?
-        WHERE id=?
-    """, (role, user_id))
-
-    conn.commit()
-    conn.close()
-
-
-def activate_user(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE users
-        SET is_active=1
-        WHERE id=?
-    """, (user_id,))
+        cur.execute("""
+            INSERT INTO kpi_inputs (review_id, kpi_id, value)
+            VALUES (?, ?, ?)
+        """, (int(review_id), str(kpi_id), float(value) if value is not None else 0.0))
 
     conn.commit()
     conn.close()
 
 
 # ==========================================================
-# SUBSCRIPTIONS
+# FINANCIAL RAW (RELOAD PERSISTENCE)
 # ==========================================================
 
-def get_user_subscription(user_id):
-    conn = get_conn()
+def save_financial_raw(review_id: int, data: Dict[str, Any]) -> None:
+    conn = get_connection()
     cur = conn.cursor()
 
+    payload = json.dumps(data or {}, ensure_ascii=False)
+
+    # keep 1 latest row per review_id
+    cur.execute("DELETE FROM financial_raw WHERE review_id=?", (int(review_id),))
+    # write into BOTH columns for maximum compatibility
     cur.execute("""
-        SELECT *
-        FROM subscriptions
-        WHERE user_id=?
-        AND is_active=1
-        LIMIT 1
-    """, (user_id,))
-
-    row = cur.fetchone()
-    conn.close()
-
-    if not row:
-        return None
-
-    return dict(row)
-
-
-def create_subscription(user_id, plan, start_date, end_date, max_reviews, max_exports):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        INSERT INTO subscriptions (
-            user_id,
-            plan,
-            start_date,
-            end_date,
-            max_reviews,
-            max_exports,
-            used_reviews,
-            used_exports,
-            is_active
-        )
-        VALUES (?, ?, ?, ?, ?, ?, 0, 0, 1)
-    """, (
-        user_id,
-        plan,
-        start_date,
-        end_date,
-        max_reviews,
-        max_exports
-    ))
-
-    conn.commit()
-    conn.close()
-
-
-def increment_reviews(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE subscriptions
-        SET used_reviews = used_reviews + 1
-        WHERE user_id=?
-    """, (user_id,))
-
-    conn.commit()
-    conn.close()
-
-
-def increment_exports(user_id):
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE subscriptions
-        SET used_exports = used_exports + 1
-        WHERE user_id=?
-    """, (user_id,))
-
-    conn.commit()
-    conn.close()
-
-
-# ==========================================================
-# FINANCIAL RAW (PERSIST INPUTS)
-# ==========================================================
-
-def save_financial_raw(review_id, data: dict):
-    conn = get_conn()
-    _ensure_financial_raw_shape(conn)
-
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO financial_raw (review_id, data_json, updated_at)
+        INSERT INTO financial_raw (review_id, payload, data_json)
         VALUES (?, ?, ?)
-        ON CONFLICT(review_id) DO UPDATE SET
-            data_json=excluded.data_json,
-            updated_at=excluded.updated_at
-    """, (
-        int(review_id),
-        json.dumps(data, ensure_ascii=False),
-        datetime.utcnow().isoformat()
-    ))
+    """, (int(review_id), payload, payload))
 
     conn.commit()
     conn.close()
 
 
-def load_financial_raw(review_id):
-    conn = get_conn()
-    _ensure_financial_raw_shape(conn)
-
+def load_financial_raw(review_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
     cur = conn.cursor()
+
+    # Use COALESCE so we don't crash if one column is missing/empty
     cur.execute("""
-        SELECT data_json
+        SELECT COALESCE(payload, data_json) AS payload
         FROM financial_raw
         WHERE review_id=?
+        ORDER BY id DESC
         LIMIT 1
     """, (int(review_id),))
 
@@ -550,133 +275,7 @@ def load_financial_raw(review_id):
     if not row:
         return None
 
-    try:
-        payload = row["data_json"]
-        if not payload:
-            return None
-        return json.loads(payload)
-    except Exception:
-        return None
-
-
-# ==========================================================
-# FINANCIAL KPI SAVE (USES KPI_INPUTS)
-# ==========================================================
-
-def save_financial_kpis(review_id, metrics: dict):
-    """
-    Saves computed KPIs into kpi_inputs so they show up on Data Input page.
-    metrics example:
-    {
-        "FIN_REV_GROWTH": 12.5,
-        "FIN_PROFIT_MARGIN": 24.3,
-    }
-    """
-    for kpi_id, value in (metrics or {}).items():
-        save_kpi_value(review_id, kpi_id, float(value))
-
-
-# ==========================================================
-# FINANCIAL RAW (PERSISTENCE FOR RELOAD/NAVIGATION)
-# ==========================================================
-
-import json
-import sqlite3
-
-
-def _ensure_financial_raw_shape(conn: sqlite3.Connection) -> None:
-    """Ensure `financial_raw` exists and contains both legacy/new JSON columns.
-
-    Railway deployments often reuse an existing SQLite file whose table schema may
-    be older (e.g., a `financial_raw` table without the column your new code
-    selects). We avoid breakage by:
-      - creating the table if missing
-      - adding missing columns when possible
-      - never selecting a specific JSON column name in a way that can crash
-    """
-    cur = conn.cursor()
-
-    # Create the table if it's missing (includes both possible JSON columns)
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS financial_raw (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            review_id INTEGER NOT NULL,
-            payload  TEXT,
-            data_json TEXT,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    # Add missing columns if the table pre-existed with an older shape
-    cur.execute("PRAGMA table_info(financial_raw)")
-    cols = [row[1] for row in cur.fetchall()]  # row[1] = column name
-
-    if "payload" not in cols:
-        cur.execute("ALTER TABLE financial_raw ADD COLUMN payload TEXT")
-    if "data_json" not in cols:
-        cur.execute("ALTER TABLE financial_raw ADD COLUMN data_json TEXT")
-
-    # updated_at is optional for older tables; we don't depend on it
-    conn.commit()
-
-
-def save_financial_raw(review_id: int, data: dict) -> None:
-    """Persist Financial Analyzer raw inputs for a review."""
-    conn = get_conn()
-    _ensure_financial_raw_shape(conn)
-    cur = conn.cursor()
-
-    payload = json.dumps(data or {}, ensure_ascii=False)
-
-    # Keep one latest row per review_id (simple upsert pattern)
-    cur.execute("DELETE FROM financial_raw WHERE review_id=?", (int(review_id),))
-    cur.execute(
-        "INSERT INTO financial_raw (review_id, payload, data_json) VALUES (?, ?, ?)",
-        (int(review_id), payload, payload),
-    )
-
-    conn.commit()
-    conn.close()
-
-
-def load_financial_raw(review_id: int):
-    """Load Financial Analyzer raw inputs for a review. Returns dict or None."""
-    conn = get_conn()
-    _ensure_financial_raw_shape(conn)
-    cur = conn.cursor()
-
-    # IMPORTANT: Select * (not a specific column) to avoid crashes on older schemas.
-    cur.execute(
-        """
-        SELECT *
-        FROM financial_raw
-        WHERE review_id=?
-        ORDER BY id DESC
-        LIMIT 1
-        """,
-        (int(review_id),),
-    )
-
-    row = cur.fetchone()
-    desc = cur.description
-    conn.close()
-
-    if not row:
-        return None
-
-    # Convert row to dict safely (works for tuple rows and sqlite3.Row)
-    try:
-        if isinstance(row, sqlite3.Row):
-            rec = {k: row[k] for k in row.keys()}
-        else:
-            cols = [d[0] for d in (desc or [])]
-            rec = dict(zip(cols, row))
-    except Exception:
-        rec = {}
-
-    raw = rec.get("payload") or rec.get("data_json")
+    raw = row["payload"]
     if not raw:
         return None
 
@@ -686,53 +285,84 @@ def load_financial_raw(review_id: int):
         return None
 
 
-import json
-import sqlite3
+# ==========================================================
+# AI REPORTS (FINANCIAL ANALYZER INSIGHTS + ALERTS)
+# ==========================================================
 
-def _ensure_financial_ai_table(conn: sqlite3.Connection):
+def save_ai_report(review_id: int, report_type: str, payload: Dict[str, Any]) -> None:
+    conn = get_connection()
     cur = conn.cursor()
+
+    data = json.dumps(payload or {}, ensure_ascii=False)
+
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS financial_ai (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            review_id INTEGER NOT NULL,
-            insights TEXT,
-            alerts TEXT,
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
+        DELETE FROM ai_reports
+        WHERE review_id=? AND report_type=?
+    """, (int(review_id), str(report_type)))
 
-def save_financial_ai_report(review_id: int, insights, alerts):
-    """
-    Saves Financial Analyzer AI Advisor messages + alerts for a given review.
-    """
-    conn = get_conn()
-    _ensure_financial_ai_table(conn)
-    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO ai_reports (review_id, report_type, payload)
+        VALUES (?, ?, ?)
+    """, (int(review_id), str(report_type), data))
 
-    insights_json = json.dumps(list(insights or []), ensure_ascii=False)
-    alerts_json = json.dumps(list(alerts or []), ensure_ascii=False)
-
-    # keep latest only
-    cur.execute("DELETE FROM financial_ai WHERE review_id=?", (int(review_id),))
-    cur.execute(
-        "INSERT INTO financial_ai (review_id, insights, alerts) VALUES (?, ?, ?)",
-        (int(review_id), insights_json, alerts_json)
-    )
     conn.commit()
     conn.close()
 
-def load_financial_ai_report(review_id: int):
-    """
-    Returns dict: { 'insights': [...], 'alerts': [...] } or None
-    """
-    conn = get_conn()
-    _ensure_financial_ai_table(conn)
+
+def load_ai_report(review_id: int, report_type: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT insights, alerts
-        FROM financial_ai
+        SELECT payload
+        FROM ai_reports
+        WHERE review_id=? AND report_type=?
+        ORDER BY id DESC
+        LIMIT 1
+    """, (int(review_id), str(report_type)))
+
+    row = cur.fetchone()
+    conn.close()
+
+    if not row or not row["payload"]:
+        return None
+
+    try:
+        return json.loads(row["payload"])
+    except Exception:
+        return None
+
+
+# ==========================================================
+# SCORES (SAVE/LOAD)
+# ==========================================================
+
+def save_scores(review_id: int, bhi: float, pillar_avgs: Dict[str, float], kpi_scores: Dict[str, float]) -> None:
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM scores WHERE review_id=?", (int(review_id),))
+    cur.execute("""
+        INSERT INTO scores (review_id, bhi, pillar_json, kpi_json)
+        VALUES (?, ?, ?, ?)
+    """, (
+        int(review_id),
+        float(bhi) if bhi is not None else 0.0,
+        json.dumps(pillar_avgs or {}, ensure_ascii=False),
+        json.dumps(kpi_scores or {}, ensure_ascii=False)
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def get_scores(review_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT bhi, pillar_json, kpi_json
+        FROM scores
         WHERE review_id=?
         ORDER BY id DESC
         LIMIT 1
@@ -745,13 +375,52 @@ def load_financial_ai_report(review_id: int):
         return None
 
     try:
-        insights = json.loads(row[0]) if row[0] else []
+        pillar = json.loads(row["pillar_json"] or "{}")
     except Exception:
-        insights = []
+        pillar = {}
+
     try:
-        alerts = json.loads(row[1]) if row[1] else []
+        kpis = json.loads(row["kpi_json"] or "{}")
     except Exception:
-        alerts = []
+        kpis = {}
 
-    return {"insights": insights, "alerts": alerts}
+    return {
+        "bhi": float(row["bhi"] or 0.0),
+        "pillars": pillar,
+        "kpis": kpis
+    }
 
+
+# ==========================================================
+# EXPORTS
+# ==========================================================
+
+def increment_exports(user_id: Optional[int], review_id: Optional[int], export_type: str = "board_report") -> None:
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO exports (user_id, review_id, export_type)
+        VALUES (?, ?, ?)
+    """, (
+        int(user_id) if user_id is not None else None,
+        int(review_id) if review_id is not None else None,
+        str(export_type)
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_exports_count(user_id: Optional[int], export_type: str = "board_report") -> int:
+    conn = get_connection()
+    cur = conn.cursor()
+    if user_id is None:
+        cur.execute("SELECT COUNT(*) AS c FROM exports WHERE export_type=?", (str(export_type),))
+    else:
+        cur.execute("""
+            SELECT COUNT(*) AS c
+            FROM exports
+            WHERE export_type=? AND user_id=?
+        """, (str(export_type), int(user_id)))
+    row = cur.fetchone()
+    conn.close()
+    return int(row["c"] or 0)

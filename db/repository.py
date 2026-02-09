@@ -34,6 +34,65 @@ def get_connection() -> sqlite3.Connection:
 def get_conn() -> sqlite3.Connection:
     return get_connection()
 
+# ==========================================================
+# USERS (AUTH HELPERS) — required by app.py imports
+# ==========================================================
+
+import sqlite3
+
+def _ensure_users_table(conn: sqlite3.Connection):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            full_name TEXT,
+            password_hash TEXT,
+            role TEXT DEFAULT 'Pending',
+            is_active INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+
+
+def create_user(email, name, password_hash, role="Pending", is_active=0):
+    """
+    Creates a new user record.
+    NOTE: This expects a PASSWORD HASH (not plain password),
+    because app.py imports create_user and your earlier repo style used password_hash.
+    """
+    conn = get_conn()
+    _ensure_users_table(conn)
+
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO users (email, full_name, password_hash, role, is_active)
+        VALUES (?, ?, ?, ?, ?)
+    """, (email, name, password_hash, role, int(is_active)))
+
+    conn.commit()
+    conn.close()
+
+
+def get_user_by_email(email):
+    """
+    Returns a sqlite3.Row (or None) for the given email.
+    """
+    conn = get_conn()
+    _ensure_users_table(conn)
+
+    row = conn.execute("""
+        SELECT id, email, full_name, password_hash, role, is_active
+        FROM users
+        WHERE email = ?
+        LIMIT 1
+    """, (email,)).fetchone()
+
+    conn.close()
+    return row
+
+
 
 def _bootstrap_schema_if_needed(conn: sqlite3.Connection) -> None:
     """

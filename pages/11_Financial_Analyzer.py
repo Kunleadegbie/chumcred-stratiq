@@ -9,6 +9,9 @@ from core.financial_engine import analyze_financials
 from core.excel_parser import parse_financial_excel
 from core.finance_advisor import generate_finance_insights
 from core.finance_alerts import generate_finance_alerts
+from db.repository import save_financial_ai_report
+from core.pdf_engine import save_financial_ai_report
+
 
 from db.repository import (
     get_reviews,
@@ -364,6 +367,19 @@ if st.button("📈 Analyze Financials"):
 
     st.success("✅ All 5 KPIs calculated and saved (Financial + Customer + Operations + People)")
 
+
+    # Persist AI narrative for Board Report PDF
+    ai_lines = []
+    ai_lines.extend(st.session_state.get("finance_insights", []))
+
+    alerts = st.session_state.get("finance_alerts", [])
+    for lvl, msg in alerts:
+        ai_lines.append(f"{lvl}: {msg}")
+
+    save_financial_ai_report(
+        st.session_state["active_review"],
+        "\n".join([x for x in ai_lines if x])
+    )
 
 # ==================================================
 # RESULTS

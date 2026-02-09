@@ -686,3 +686,72 @@ def load_financial_raw(review_id: int):
         return None
 
 
+import json
+import sqlite3
+
+def _ensure_financial_ai_table(conn: sqlite3.Connection):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS financial_ai (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            review_id INTEGER NOT NULL,
+            insights TEXT,
+            alerts TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+
+def save_financial_ai_report(review_id: int, insights, alerts):
+    """
+    Saves Financial Analyzer AI Advisor messages + alerts for a given review.
+    """
+    conn = get_conn()
+    _ensure_financial_ai_table(conn)
+    cur = conn.cursor()
+
+    insights_json = json.dumps(list(insights or []), ensure_ascii=False)
+    alerts_json = json.dumps(list(alerts or []), ensure_ascii=False)
+
+    # keep latest only
+    cur.execute("DELETE FROM financial_ai WHERE review_id=?", (int(review_id),))
+    cur.execute(
+        "INSERT INTO financial_ai (review_id, insights, alerts) VALUES (?, ?, ?)",
+        (int(review_id), insights_json, alerts_json)
+    )
+    conn.commit()
+    conn.close()
+
+def load_financial_ai_report(review_id: int):
+    """
+    Returns dict: { 'insights': [...], 'alerts': [...] } or None
+    """
+    conn = get_conn()
+    _ensure_financial_ai_table(conn)
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT insights, alerts
+        FROM financial_ai
+        WHERE review_id=?
+        ORDER BY id DESC
+        LIMIT 1
+    """, (int(review_id),))
+
+    row = cur.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    try:
+        insights = json.loads(row[0]) if row[0] else []
+    except Exception:
+        insights = []
+    try:
+        alerts = json.loads(row[1]) if row[1] else []
+    except Exception:
+        alerts = []
+
+    return {"insights": insights, "alerts": alerts}
+

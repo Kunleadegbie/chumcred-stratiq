@@ -1,191 +1,163 @@
 import streamlit as st
 
-from core.roles import ROLE_PAGES
 from db.repository import get_reviews
 
 from components.styling import apply_talentiq_sidebar_style
 from components.sidebar import render_sidebar
-from components.footer import render_footer
 
 
-# ---------------- Auth Guard ----------------
-if "user" not in st.session_state:
-    st.switch_page("pages/Login.py")
-    st.stop()
-
-
-# ---------------- Role Guard (robust) ----------------
-role = (st.session_state["user"].get("role") or "").strip()
-page_name = "1_Home"
-
-allowed = ROLE_PAGES.get(role, [])
-# Support both formats: list[str] OR list[tuple(label,path)]
-allowed_names = set()
-for item in allowed:
-    if isinstance(item, str):
-        allowed_names.add(item)
-    elif isinstance(item, (list, tuple)) and item:
-        allowed_names.add(str(item[0]))
-        allowed_names.add(str(item[1]))
-
-if (page_name not in allowed_names) and (page_name not in allowed):
-    st.error("⛔ Access denied.")
-    st.stop()
-
-
-# ---------------- UI Styling + Sidebar ----------------
 apply_talentiq_sidebar_style()
 render_sidebar()
 
+st.title("🏠 Home")
 
-# ---------------- Main ----------------
-st.title("🏠 Welcome to the Business Health Diagnostic (BHD)")
+
+# ==================================================
+# APP OVERVIEW (MARKDOWN)
+# ==================================================
 
 st.markdown(
     """
-## What this app is about
+## Chumcred Business Diagnostic & KPI Scoring Platform
 
-This platform helps organizations **measure business health**, **diagnose performance gaps**, and **produce board-ready insights**
-using a structured KPI framework across key pillars (e.g., Financial, Customer, Operations, People).
+This app helps corporate organizations **diagnose business health** using a simple, structured workflow:
 
-It is designed for leadership teams who want a **clear, consistent, data-driven view** of performance—without relying on scattered spreadsheets.
-
----
-
-## The challenges this app helps solve
-
-- **Fragmented KPIs:** KPIs often live in different files and departments, making it hard to get one reliable view.
-- **No consistent scoring:** Teams struggle to translate raw KPI values into an objective performance score.
-- **Slow reporting:** Preparing management/board reports takes time and often lacks consistency.
-- **Decision delays:** Without a structured diagnostic view, issues are discovered too late.
+1. **Create a Review** (company + industry)
+2. **Input KPI Values** (or send KPIs from Financial Analyzer)
+3. **Generate Scores** (KPI scores → Pillar averages → Business Health Index)
+4. **Benchmark** (optional industry comparisons)
+5. **Export a Board-ready Report** (PDF report for leadership decisions)
 
 ---
 
-## Benefits to any corporate organization
+### The challenge this app solves
+Many organizations struggle with:
+- KPI data scattered across teams (Finance, Operations, People, Customer)
+- Lack of a consistent scoring method to interpret KPI numbers
+- No single “business health” snapshot that leadership can use quickly
+- Reports that are not standardized for board/management use
 
-- **Standardized assessment:** Same KPI definitions and scoring rules applied every time.
-- **Faster decision-making:** Clear KPI scores, pillar averages, and overall Business Health Index (BHI).
-- **Improved accountability:** Everyone sees what is measured and what “good” looks like.
-- **Board-ready outputs:** Cleaner reporting that supports executive discussions and action plans.
+---
+
+### Benefits to any corporate organization
+Using this app, you can:
+- **Standardize KPI assessment** across departments
+- **Detect risk early** (weak pillars show up immediately)
+- **Track improvement over time** through repeated reviews
+- **Improve decision speed** with a single Business Health Index (BHI)
+- **Generate leadership-ready reports** (consistent format)
 
 ---
 
-## What you should expect when using the app
-
-1. **Create a Review** (New Review) – choose the company/unit and industry.
-2. **Enter KPI Values** (Data Input) – supply your KPI values for the review period.
-3. **Financial Analyzer** – upload/enter financials and generate financial KPIs + AI insights.
-4. **Scoring Dashboard** – compute KPI scores, pillar averages, and the Business Health Index (BHI).
-5. **Benchmarking** – compare performance to industry reference benchmarks (where available).
-6. **Board Report Export** – generate a management/board-ready report for sharing.
-
----
+### What you should expect when using this app
+- A **guided workflow** from data input → scoring → insights
+- **Saved data** per review (so refresh/reload doesn’t wipe entries)
+- Clear KPI scoring and pillar summaries you can explain to executives
 """
 )
 
-# ---------------- KPI Glossary (auto from the same registry used in Data Input) ----------------
-st.subheader("📘 KPI Guide (What each KPI means)")
+st.divider()
 
+
+# ==================================================
+# KPI EXPLANATIONS (pull from KPI registry)
+# ==================================================
+
+st.markdown("## KPI Guide (What each KPI means)")
+
+kpi_defs = {}
 try:
-    from core.kpi_registry import load_kpis
-    kpis = load_kpis() or {}
+    from core.kpi_registry import load_kpis  # local project module
+    kpi_defs = load_kpis() or {}
 except Exception:
-    kpis = {}
+    kpi_defs = {}
 
-if not kpis:
+# Preferred order (matches your earlier definitions); we will show up to 6 KPIs.
+preferred_order = [
+    "FIN_REV_GROWTH",
+    "FIN_PROFIT_MARGIN",
+    "CUST_CHURN",
+    "OPS_COST_RATIO",
+    "PEOPLE_ATTRITION",
+]
+
+# Build display list: preferred first, then any remaining until we reach 6
+ordered_ids = []
+for k in preferred_order:
+    if k in kpi_defs:
+        ordered_ids.append(k)
+
+for k in kpi_defs.keys():
+    if k not in ordered_ids:
+        ordered_ids.append(k)
+
+ordered_ids = ordered_ids[:6]  # show 6 (as requested)
+
+if not kpi_defs:
     st.info(
         "KPI definitions could not be loaded. "
-        "If this persists, confirm `data/kpi_definitions.json` exists and `core/kpi_registry.py` can read it."
+        "Ensure `core/kpi_registry.py` can read `data/kpi_definitions.json`."
     )
 else:
-    st.markdown(
-        """
-Below are the KPIs used in the **Data Input** page. Read these definitions carefully so you understand
-what you are entering and how it affects scoring.
+    for kpi_id in ordered_ids:
+        cfg = kpi_defs.get(kpi_id, {})
+        name = cfg.get("name", kpi_id)
+        pillar = cfg.get("pillar", "—")
+        unit = cfg.get("unit", "—")
+        direction = cfg.get("direction", "—")
+
+        # Friendly explanation defaults (keeps page useful even if JSON lacks descriptions)
+        default_explainer = {
+            "FIN_REV_GROWTH": (
+                "Measures how fast revenue is growing year-on-year (YoY). "
+                "Higher growth usually indicates stronger market demand and/or expansion."
+            ),
+            "FIN_PROFIT_MARGIN": (
+                "Shows how much profit the company keeps from revenue after costs. "
+                "Higher margins mean better efficiency and pricing power."
+            ),
+            "CUST_CHURN": (
+                "The percentage of customers who stop using your service over a period. "
+                "Lower churn means customers are staying and loyalty is improving."
+            ),
+            "OPS_COST_RATIO": (
+                "Operating costs as a percentage of revenue (or total operating base). "
+                "Lower ratio often means the business is running more efficiently."
+            ),
+            "PEOPLE_ATTRITION": (
+                "The percentage of employees leaving the organization over a period. "
+                "Lower attrition typically indicates better retention and culture stability."
+            ),
+        }
+
+        explainer = default_explainer.get(kpi_id, "This KPI helps measure performance within its pillar.")
+
+        st.markdown(
+            f"""
+### **{name}** (`{kpi_id}`)
+- **Pillar:** {pillar}
+- **Unit:** {unit}
+- **Direction:** {direction}
+
+**What it means:** {explainer}
+
+**Tip:** Use real operational or audited sources (finance reports, HR attrition logs, customer churn analytics) for best accuracy.
 """
-    )
-
-    # group by pillar if present
-    by_pillar = {}
-    for kpi_id, cfg in kpis.items():
-        pillar = str(cfg.get("pillar", "GENERAL")).strip() or "GENERAL"
-        by_pillar.setdefault(pillar, []).append((kpi_id, cfg))
-
-    for pillar in sorted(by_pillar.keys()):
-        with st.expander(f"📌 {pillar.title()} KPIs", expanded=True):
-            for kpi_id, cfg in sorted(by_pillar[pillar], key=lambda x: x[0]):
-                name = cfg.get("name", kpi_id)
-                unit = cfg.get("unit", "")
-                direction = cfg.get("direction", "")
-
-                # friendly, practical explanations for your known KPI IDs; fallback for others
-                extra = ""
-                if kpi_id == "FIN_REV_GROWTH":
-                    extra = (
-                        "- **Meaning:** Year-on-year change in revenue.\n"
-                        "- **Why it matters:** Shows whether the business is expanding or shrinking.\n"
-                        "- **How to estimate:** `((Revenue this year - Revenue last year) / Revenue last year) * 100`.\n"
-                        "- **Tip:** Use audited/management accounts; ensure same period comparison.\n"
-                    )
-                elif kpi_id == "FIN_PROFIT_MARGIN":
-                    extra = (
-                        "- **Meaning:** Percentage of revenue that becomes profit.\n"
-                        "- **Why it matters:** Measures profitability and cost discipline.\n"
-                        "- **How to estimate:** `(Net Profit / Revenue) * 100`.\n"
-                        "- **Tip:** If profit is negative, margin will be negative—this will lower the score.\n"
-                    )
-                elif kpi_id == "CUST_CHURN":
-                    extra = (
-                        "- **Meaning:** Percentage of customers who stop using your product/service in a period.\n"
-                        "- **Why it matters:** High churn signals service issues, pricing problems, or competition pressure.\n"
-                        "- **How to estimate:** `(Customers lost during period / Customers at start) * 100`.\n"
-                        "- **Tip:** Define “active customer” clearly (e.g., active in last 30/90 days).\n"
-                    )
-                elif kpi_id == "OPS_COST_RATIO":
-                    extra = (
-                        "- **Meaning:** Operating costs as a percentage of revenue.\n"
-                        "- **Why it matters:** Indicates operational efficiency.\n"
-                        "- **How to estimate:** `(Operating Costs / Revenue) * 100`.\n"
-                        "- **Tip:** Ensure you consistently include/exclude the same cost items each time.\n"
-                    )
-                elif kpi_id == "PEOPLE_ATTRITION":
-                    extra = (
-                        "- **Meaning:** Percentage of employees who leave during a period.\n"
-                        "- **Why it matters:** High attrition affects performance, culture, and cost (replacement/training).\n"
-                        "- **How to estimate:** `(Number of leavers / Average headcount) * 100`.\n"
-                        "- **Tip:** Use HR records; treat involuntary vs voluntary exits consistently.\n"
-                    )
-                else:
-                    extra = (
-                        "- **Meaning:** Enter the KPI value for the review period based on your internal measurement.\n"
-                        "- **Tip:** Keep measurement definitions consistent across periods for fair scoring.\n"
-                    )
-
-                st.markdown(
-                    f"""
-### {name} (`{kpi_id}`)
-- **Unit:** `{unit}`  
-- **Scoring direction:** `{direction}`  
-
-{extra}
-"""
-                )
+        )
 
 st.divider()
 
-# ---------------- Reviews ----------------
-st.subheader("📂 Existing Reviews")
+
+# ==================================================
+# EXISTING REVIEWS (your original content)
+# ==================================================
+
+st.subheader("📌 Existing Reviews")
 
 reviews = get_reviews()
 
 if not reviews:
-    st.info("No reviews yet. Create one to begin.")
+    st.info("No reviews yet. Create one from **New Review**.")
 else:
     for r in reviews:
-        st.write(f"#{r[0]} | {r[1]} ({r[2]}) | {r[3]}")
-
-st.divider()
-st.markdown("➡ Go to **New Review** to create a new assessment.")
-
-
-render_footer()
+        st.write(f"✅ {r[1]} — {r[2]}")

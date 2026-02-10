@@ -9,25 +9,64 @@ from services.auth import hash_password
 # ==========================================================
 
 def bootstrap_admin():
+    """
+    Ensures a working Admin account exists and is ACTIVE.
+    Fixes Railway issues where password was stored un-hashed,
+    causing 'Invalid email or password'.
+    """
+    from services.auth import hash_password
+    from db.repository import (
+        get_user_by_email,
+        create_user,
+        update_user_role,
+        activate_user,
+        get_conn,
+    )
 
     admin_email = "chumcred@gmail.com"
+    admin_pass = "admin123"
+    admin_name = "Chumcred Admin"
 
     existing = get_user_by_email(admin_email)
 
     if not existing:
-
+        # create with HASHED password
         create_user(
             email=admin_email,
-            name="System Administrator",
-            password_hash=hash_password("admin123"),
+            full_name=admin_name,
+            password_hash=hash_password(admin_pass),
             role="Admin",
             is_active=1
         )
+        return
 
-        print("Production admin created")
+    # Ensure role is Admin (use user_id, not email)
+    try:
+        if (existing["role"] or "").strip().lower() != "admin":
+            update_user_role(existing["id"], "Admin")
+    except Exception:
+        pass
 
+    # Ensure account is active
+    try:
+        if int(existing["is_active"] or 0) != 1:
+            activate_user(existing["id"])
+    except Exception:
+        pass
 
-bootstrap_admin()
+    # Ensure password is HASHED in DB (fix previously-created bad row)
+    try:
+        desired = hash_password(admin_pass)
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE users SET password_hash=? WHERE email=?",
+            (desired, admin_email)
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 # ==========================================================

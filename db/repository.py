@@ -531,3 +531,42 @@ def get_scores(review_id: int):
             "pillar": r["pillar"],
         })
     return out
+
+
+def upsert_admin_user(email: str, name: str, password_hash: str):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    email_norm = (email or "").strip().lower()
+
+    # Ensure users table exists (only if your project uses this pattern)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE,
+            name TEXT,
+            password_hash TEXT,
+            role TEXT,
+            is_active INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cur.execute("SELECT id FROM users WHERE lower(email)=?", (email_norm,))
+    row = cur.fetchone()
+
+    if row:
+        cur.execute("""
+            UPDATE users
+            SET name=?, password_hash=?, role='Admin', is_active=1
+            WHERE lower(email)=?
+        """, (name, password_hash, email_norm))
+    else:
+        cur.execute("""
+            INSERT INTO users (email, name, password_hash, role, is_active)
+            VALUES (?, ?, ?, 'Admin', 1)
+        """, (email_norm, name, password_hash))
+
+    conn.commit()
+    conn.close()
+
